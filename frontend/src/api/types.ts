@@ -228,5 +228,7 @@ export interface PublicTicket {
     phase: EventPhase
     starts_at: string
     checkin_until: string
+    branch_name: string | null
+    branch_address: string | null
   }
 }

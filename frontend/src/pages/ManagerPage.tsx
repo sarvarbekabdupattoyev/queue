@@ -11,13 +11,14 @@ import {
   IconMegaphone,
   IconSkip,
 } from '../components/icons'
-import { useToast } from '../components/ui'
+import { useConfirm, useToast } from '../components/ui'
 import { formatCountdown, formatLongCountdown } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
 export default function ManagerPage() {
   const { user } = useAuth()
   const toast = useToast()
+  const confirm = useConfirm()
   const now = useTick()
   const [eventId, setEventId] = useState<number | null>(() => {
     const saved = localStorage.getItem('navbat_event')
@@ -65,7 +66,8 @@ export default function ManagerPage() {
   const untilQueue = state ? new Date(state.event.checkin_until).getTime() - now : 0
 
   const act = async (path: string, body: Record<string, unknown>, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return
+    if (confirmText && !(await confirm({ title: confirmText, confirmLabel: 'Ha', icon: IconSkip })))
+      return
     setBusy(true)
     try {
       const result = await api<ActionResponse>(`/queue/${eventId}/${path}`, { body })
@@ -105,8 +107,8 @@ export default function ManagerPage() {
           <div>
             <div className="card">
               <div className="card-title">
-                <span>Mening stolim</span>
-                <span>{desk ? `${desk.number}-stol` : ''}</span>
+                Mening stolim
+                <span className="aux">{desk ? `${desk.number}-stol` : ''}</span>
               </div>
               {!queueStarted && state && (
                 <p className="hint" style={{ marginBottom: 12 }}>
@@ -217,8 +219,8 @@ export default function ManagerPage() {
 
           <div className="card">
             <div className="card-title">
-              <span>Navbatda (kelganlar)</span>
-              <span>{waiting.length ? `${waiting.length} kishi` : ''}</span>
+              Navbatda (kelganlar)
+              <span className="aux">{waiting.length ? `${waiting.length} kishi` : ''}</span>
             </div>
             {waiting.length === 0 ? (
               <div className="empty">

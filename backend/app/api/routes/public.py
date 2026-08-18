@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession
-from app.models import SaleEvent, Ticket
+from app.models import Branch, SaleEvent, Ticket
 from app.services import queue_service
 from app.services.qr_service import qr_data_url_async
 
@@ -26,6 +26,7 @@ async def ticket_state(code: str, db: DbSession) -> dict:
     if ticket is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Navbat topilmadi")
     event = await db.get(SaleEvent, ticket.event_id)
+    branch = await db.get(Branch, event.branch_id) if event.branch_id else None
     position = await queue_service.position_of(db, ticket)
     desk_numbers = await queue_service.desk_numbers_for(db, [ticket])
     return {
@@ -42,5 +43,7 @@ async def ticket_state(code: str, db: DbSession) -> dict:
             "phase": event.phase().value,
             "starts_at": event.starts_at.isoformat(),
             "checkin_until": event.checkin_until.isoformat(),
+            "branch_name": branch.name if branch else None,
+            "branch_address": branch.address if branch else None,
         },
     }

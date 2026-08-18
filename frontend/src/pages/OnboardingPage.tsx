@@ -16,6 +16,11 @@ export default function OnboardingPage() {
 
   return (
     <div className="auth-shell">
+      <span className="blobs" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
       <div className="auth-corner">
         <ThemeToggle />
       </div>
