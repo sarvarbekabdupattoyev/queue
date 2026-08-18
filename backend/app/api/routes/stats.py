@@ -9,7 +9,7 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import DbSession, OwnCompany, require_roles
 from app.db.base import now_utc
@@ -61,6 +61,9 @@ async def stats_overview(
         )
     ).all()
 
+    # Registration often opens weeks before the sale day, so a ticket can be
+    # registered outside the window yet arrive inside it — fetch by either
+    # timestamp and window-guard each metric separately below.
     tickets = (
         await db.execute(
             select(
@@ -73,7 +76,13 @@ async def stats_overview(
                 Ticket.finished_at,
             )
             .join(SaleEvent, Ticket.event_id == SaleEvent.id)
-            .where(SaleEvent.company_id == company.id, Ticket.registered_at >= window_start)
+            .where(
+                SaleEvent.company_id == company.id,
+                or_(
+                    Ticket.registered_at >= window_start,
+                    Ticket.checked_in_at >= window_start,
+                ),
+            )
         )
     ).all()
 
@@ -89,46 +98,47 @@ async def stats_overview(
         b.id: {"registered": 0, "arrived": 0, "served": 0} for b in branches
     }
 
+    def local_day(at):
+        return at.astimezone(TASHKENT).date() if at is not None else None
+
     for t in tickets:
         registered_local = t.registered_at.astimezone(TASHKENT)
+        registered_in_window = registered_local.date() in daily
         cancelled = t.status == TicketStatus.CANCELLED
-        arrived = t.status in ARRIVED_STATUSES
+        arrived_day = local_day(t.checked_in_at)
+        arrived_in_window = arrived_day in daily and not cancelled
         served = t.status == TicketStatus.DONE
+        served_day = local_day(t.finished_at) if served else None
 
-        if cancelled:
-            totals["cancelled"] += 1
-        else:
-            totals["registered"] += 1
-            if registered_local.date() in daily:
+        if registered_in_window:
+            if cancelled:
+                totals["cancelled"] += 1
+            else:
+                totals["registered"] += 1
                 daily[registered_local.date()]["registered"] += 1
-            hourly[registered_local.hour] += 1
-        if arrived:
+                hourly[registered_local.hour] += 1
+        if arrived_in_window:
             totals["arrived"] += 1
+            daily[arrived_day]["arrived"] += 1
             if t.late:
                 totals["late"] += 1
-            if t.checked_in_at is not None:
-                checkin_local = t.checked_in_at.astimezone(TASHKENT)
-                if checkin_local.date() in daily:
-                    daily[checkin_local.date()]["arrived"] += 1
-        if t.status == TicketStatus.SKIPPED:
-            totals["skipped"] += 1
-        if served:
+            if t.status == TicketStatus.SKIPPED:
+                totals["skipped"] += 1
+        if served and served_day in daily:
             totals["served"] += 1
-            if t.finished_at is not None:
-                finished_local = t.finished_at.astimezone(TASHKENT)
-                if finished_local.date() in daily:
-                    daily[finished_local.date()]["served"] += 1
-            if t.called_at is not None and t.finished_at is not None:
-                service_deltas.append(t.finished_at - t.called_at)
+            daily[served_day]["served"] += 1
+        if served and t.called_at is not None and t.finished_at is not None:
+            service_deltas.append(t.finished_at - t.called_at)
         if t.called_at is not None and t.checked_in_at is not None:
             wait_deltas.append(t.called_at - t.checked_in_at)
 
         branch_id = event_branch.get(t.event_id)
-        if branch_id in by_branch and not cancelled:
-            by_branch[branch_id]["registered"] += 1
-            if arrived:
+        if branch_id in by_branch:
+            if registered_in_window and not cancelled:
+                by_branch[branch_id]["registered"] += 1
+            if arrived_in_window:
                 by_branch[branch_id]["arrived"] += 1
-            if served:
+            if served and served_day in daily:
                 by_branch[branch_id]["served"] += 1
 
     # per-event breakdown for the most recent sale days (any time, not only

@@ -3,6 +3,9 @@
 from datetime import timedelta
 
 from app.db.base import now_utc
+from app.db.session import SessionFactory
+from app.models import SaleEvent
+from app.services import ticket_service
 from tests.conftest import auth, create_company, register_owner
 
 NOW = now_utc
@@ -121,20 +124,42 @@ async def test_stats_overview_counts_and_roles(client):
         )
         assert checked.status_code == 200, checked.text
 
+    # registered long before the window, arrives today: must count as arrived
+    # (not as registered) — registration opens weeks before the sale day
+    async with SessionFactory() as db:
+        db_event = await db.get(SaleEvent, event["id"])
+        early = await ticket_service.create_ticket(
+            db,
+            db_event,
+            first_name="Erta",
+            last_name="Mijoz",
+            phone="+998909999999",
+        )
+        early.registered_at = NOW() - timedelta(days=30)
+        await db.commit()
+        early_number = early.number
+    checked = await client.post(
+        f"/api/queue/{event['id']}/checkin",
+        json={"number": early_number},
+        headers=auth(token),
+    )
+    assert checked.status_code == 200, checked.text
+
     stats = await client.get("/api/stats/overview", headers=auth(token))
     assert stats.status_code == 200, stats.text
     data = stats.json()
     assert data["days"] == 14
     assert data["totals"]["registered"] == 5
-    assert data["totals"]["arrived"] == 2
+    assert data["totals"]["arrived"] == 3
     assert data["totals"]["served"] == 0
     assert data["totals"]["events"] == 1
     assert len(data["daily"]) == 14
     assert data["daily"][-1]["registered"] == 5
-    assert data["daily"][-1]["arrived"] == 2
+    assert data["daily"][-1]["arrived"] == 3
     assert sum(h["registered"] for h in data["hourly"]) == 5
     assert data["events"][-1]["id"] == event["id"]
-    assert data["events"][-1]["registered"] == 5
+    # the per-event list is all-time, so the early registration counts there
+    assert data["events"][-1]["registered"] == 6
     assert data["events"][-1]["branch_name"] == "Markaz"
     assert data["branches"] == [
         {
@@ -142,7 +167,7 @@ async def test_stats_overview_counts_and_roles(client):
             "name": "Markaz",
             "events": 1,
             "registered": 5,
-            "arrived": 2,
+            "arrived": 3,
             "served": 0,
         }
     ]
