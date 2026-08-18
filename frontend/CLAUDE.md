@@ -1,7 +1,18 @@
 # Frontend rules — SmartNavbat (read before touching frontend/)
 
-React 18 + TypeScript (strict) + Vite + TanStack Query. UI language: Uzbek.
-The root `CLAUDE.md` invariants apply on top of these.
+React 18 + TypeScript (strict) + Vite + TanStack Query. The root `CLAUDE.md`
+invariants apply on top of these.
+
+## Languages
+
+- The **operational app** (dashboard, panels, display, ticket page) is Uzbek.
+- The **marketing/auth surfaces** (landing `/`, login, register) are
+  trilingual via `src/i18n` (uz default / en / ru, persisted `sn_lang`).
+  Any new string there is added to ALL THREE dicts — `Dict` typing enforces
+  it; never hardcode text in those components.
+- Landing/auth animations use the `motion` package plus the ReactBits-style
+  components in `src/landing/bits/` — those surfaces are lazy-loaded chunks;
+  never import `motion` into the eager app bundle.
 
 ## Design system rules (the look is a feature — protect it)
 

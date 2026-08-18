@@ -1,11 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { Suspense, lazy, type ReactNode } from 'react'
 import { homeFor, useAuth } from './auth/AuthContext'
 import { Spinner } from './components/ui'
 import { DashboardLayout } from './components/DashboardLayout'
 import type { Role } from './api/types'
-import LoginPage from './pages/LoginPage'
-import RegisterPage from './pages/RegisterPage'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardHome from './pages/DashboardHome'
 import EmployeesPage from './pages/EmployeesPage'
@@ -17,6 +15,12 @@ import ManagerPage from './pages/ManagerPage'
 import ScannerPage from './pages/ScannerPage'
 import DisplayPage from './pages/DisplayPage'
 import TicketPage from './pages/TicketPage'
+
+// marketing + auth surfaces load on demand (they carry motion); the
+// operational app bundle stays lean
+const LandingPage = lazy(() => import('./landing/LandingPage'))
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const RegisterPage = lazy(() => import('./pages/RegisterPage'))
 
 function Protected({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user, loading } = useAuth()
@@ -36,8 +40,30 @@ export default function App() {
   const { user, loading } = useAuth()
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      <Route
+        path="/"
+        element={
+          <Suspense fallback={<Spinner />}>
+            <LandingPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/login"
+        element={
+          <Suspense fallback={<Spinner />}>
+            <LoginPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/register"
+        element={
+          <Suspense fallback={<Spinner />}>
+            <RegisterPage />
+          </Suspense>
+        }
+      />
       {/* public screens */}
       <Route path="/display/:displayCode" element={<DisplayPage />} />
       <Route path="/t/:code" element={<TicketPage />} />
@@ -88,9 +114,7 @@ export default function App() {
       />
       <Route
         path="*"
-        element={
-          loading ? <Spinner /> : <Navigate to={user ? homeFor(user.role) : '/login'} replace />
-        }
+        element={loading ? <Spinner /> : <Navigate to={user ? homeFor(user.role) : '/'} replace />}
       />
     </Routes>
   )
