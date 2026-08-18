@@ -1,3 +1,11 @@
+export const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentyabr', 'oktyabr', 'noyabr', 'dekabr']
+export const UZ_DAYS = ['yakshanba', 'dushanba', 'seshanba', 'chorshanba', 'payshanba', 'juma', 'shanba']
+
+/** "dushanba, 18-avgust" — the topbar date line. */
+export function uzDateLine(at: Date = new Date()): string {
+  return `${UZ_DAYS[at.getDay()]}, ${at.getDate()}-${UZ_MONTHS[at.getMonth()]}`
+}
+
 export function formatDateTime(iso: string): string {
   const d = new Date(iso)
   const dd = String(d.getDate()).padStart(2, '0')

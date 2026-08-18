@@ -257,14 +257,36 @@ export const IconBot = make('Bot', (
   </>
 ))
 
-/** SmartNavbat logo glyph: three queue dots advancing to an accented leader. */
+export const IconChart = make('Chart', (
+  <>
+    <path d="M4 4.5v13a2.5 2.5 0 0 0 2.5 2.5H20" />
+    <rect x="7.5" y="11.5" width="3.4" height="5.5" rx="1.2" />
+    <rect x="12.5" y="7.5" width="3.4" height="9.5" rx="1.2" />
+    <rect x="17.5" y="4.5" width="3.4" height="12.5" rx="1.2" />
+  </>
+))
+
+export const IconMenu = make('Menu', <path d="M4 7h16M4 12h16M4 17h16" />)
+
+export const IconChevronDown = make('ChevronDown', <path d="M6 9.5l6 6 6-6" />)
+
+export const IconUser = make('User', (
+  <>
+    <circle cx="12" cy="8" r="3.6" />
+    <path d="M5 20a7 7 0 0 1 14 0" />
+  </>
+))
+
+export const IconArrowUpRight = make('ArrowUpRight', <path d="M7 17L17 7M9 7h8v8" />)
+
+/** SmartNavbat logo glyph: three queue dots advancing to the leader. */
 export function Logo({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <rect width="32" height="32" rx="9" fill="var(--accent)" />
-      <circle cx="8.6" cy="21" r="2.5" fill="#fff" opacity="0.45" />
-      <circle cx="15.2" cy="16" r="3.1" fill="#fff" opacity="0.7" />
-      <circle cx="22.6" cy="10.4" r="3.9" fill="#fff" />
+      <rect width="32" height="32" rx="16" fill="var(--logo-bg)" />
+      <circle cx="8.6" cy="21" r="2.5" fill="var(--logo-dot)" opacity="0.5" />
+      <circle cx="15.2" cy="16" r="3.1" fill="var(--logo-dot)" opacity="0.75" />
+      <circle cx="22.6" cy="10.4" r="3.9" fill="var(--logo-dot)" />
     </svg>
   )
 }

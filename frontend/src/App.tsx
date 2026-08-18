@@ -8,8 +8,10 @@ import OnboardingPage from './pages/OnboardingPage'
 import DashboardHome from './pages/DashboardHome'
 import EmployeesPage from './pages/EmployeesPage'
 import DesksPage from './pages/DesksPage'
+import BranchesPage from './pages/BranchesPage'
 import EventsPage from './pages/EventsPage'
 import EventDetailPage from './pages/EventDetailPage'
+import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
 import ManagerPage from './pages/ManagerPage'
 import ScannerPage from './pages/ScannerPage'
@@ -81,8 +83,10 @@ export default function App() {
           ['/dashboard', <DashboardHome />],
           ['/dashboard/events', <EventsPage />],
           ['/dashboard/events/:eventId', <EventDetailPage />],
+          ['/dashboard/stats', <StatsPage />],
           ['/dashboard/employees', <EmployeesPage />],
           ['/dashboard/desks', <DesksPage />],
+          ['/dashboard/branches', <BranchesPage />],
           ['/dashboard/settings', <SettingsPage />],
         ] as [string, ReactNode][]
       ).map(([path, page]) => (

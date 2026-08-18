@@ -2,8 +2,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { EmployeeWithPassword, Role, User } from '../api/types'
-import { IconPlus } from '../components/icons'
-import { ActionForm, CopyButton, Field, Modal, Spinner, useToast } from '../components/ui'
+import { IconPlus, IconUsers } from '../components/icons'
+import {
+  ActionForm,
+  CopyButton,
+  EmptyState,
+  Field,
+  Modal,
+  Spinner,
+  useConfirm,
+  useToast,
+} from '../components/ui'
 import { prettyPhone } from '../lib/format'
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -44,6 +53,7 @@ function PasswordReveal({
 export default function EmployeesPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
   const { data: employees, isLoading } = useQuery({
     queryKey: ['employees'],
     queryFn: () => api<User[]>('/employees'),
@@ -80,13 +90,12 @@ export default function EmployeesPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Xodimlar</h1>
-          <div className="sub">Menejerlar stollarda mijoz chaqiradi, skanerlar qabulxonada QR o‘qiydi</div>
-        </div>
-        <button className="btn" onClick={() => setCreating(true)}>
-          <IconPlus size={16} /> Xodim qo‘shish
+      <div className="page-actions">
+        <span className="hint">
+          Menejerlar stollarda mijoz chaqiradi, skanerlar qabulxonada QR o‘qiydi
+        </span>
+        <button className="btn push" onClick={() => setCreating(true)}>
+          <IconPlus size={15} /> Xodim qo‘shish
         </button>
       </div>
 
@@ -94,9 +103,16 @@ export default function EmployeesPage() {
         {isLoading ? (
           <Spinner />
         ) : !employees?.length ? (
-          <div className="empty">
+          <EmptyState
+            icon={IconUsers}
+            action={
+              <button className="btn" onClick={() => setCreating(true)}>
+                <IconPlus size={15} /> Xodim qo‘shish
+              </button>
+            }
+          >
             Hozircha xodimlar yo‘q. Menejer yoki QR skaner qo‘shing — parol avtomatik yaratiladi.
-          </div>
+          </EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -112,7 +128,7 @@ export default function EmployeesPage() {
               <tbody>
                 {employees.map((employee) => (
                   <tr key={employee.id}>
-                    <td>
+                    <td className="cell-main">
                       {employee.first_name} {employee.last_name}
                     </td>
                     <td className="muted">{prettyPhone(employee.phone)}</td>
@@ -126,25 +142,33 @@ export default function EmployeesPage() {
                         {employee.is_active ? 'Faol' : 'Bloklangan'}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button
-                        className="btn ghost sm"
-                        onClick={() => resetPassword.mutate(employee)}
-                        disabled={resetPassword.isPending}
-                      >
-                        Parolni yangilash
-                      </button>{' '}
-                      <button className="btn ghost sm" onClick={() => toggleActive.mutate(employee)}>
-                        {employee.is_active ? 'Bloklash' : 'Faollashtirish'}
-                      </button>{' '}
-                      <button
-                        className="btn danger-ghost sm"
-                        onClick={() => {
-                          if (window.confirm(`${employee.first_name} o‘chirilsinmi?`)) remove.mutate(employee)
-                        }}
-                      >
-                        O‘chirish
-                      </button>
+                    <td>
+                      <span className="row-actions">
+                        <button
+                          className="btn ghost sm"
+                          onClick={() => resetPassword.mutate(employee)}
+                          disabled={resetPassword.isPending}
+                        >
+                          Parolni yangilash
+                        </button>
+                        <button className="btn ghost sm" onClick={() => toggleActive.mutate(employee)}>
+                          {employee.is_active ? 'Bloklash' : 'Faollashtirish'}
+                        </button>
+                        <button
+                          className="btn danger-ghost sm"
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `${employee.first_name} o‘chirilsinmi?`,
+                                description: 'Xodim tizimga kira olmaydi. Bu amalni qaytarib bo‘lmaydi.',
+                              })
+                            )
+                              remove.mutate(employee)
+                          }}
+                        >
+                          O‘chirish
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))}

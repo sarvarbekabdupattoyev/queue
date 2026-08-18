@@ -46,11 +46,10 @@ export default function SettingsPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Sozlamalar</h1>
-          <div className="sub">Kompaniya ma’lumotlari, aloqa raqamlari, manzillar va Telegram bot</div>
-        </div>
+      <div className="page-actions">
+        <span className="hint">
+          Kompaniya ma’lumotlari, aloqa raqamlari, manzillar va Telegram bot
+        </span>
       </div>
 
       <div className="grid-2">

@@ -11,7 +11,7 @@ import {
 export type ThemeMode = 'light' | 'dark' | 'system'
 
 const STORAGE_KEY = 'sn_theme'
-const THEME_COLORS = { light: '#f6f7fb', dark: '#0b1120' } as const
+const THEME_COLORS = { light: '#efefed', dark: '#131715' } as const
 
 interface ThemeContextValue {
   mode: ThemeMode

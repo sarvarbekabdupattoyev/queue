@@ -62,6 +62,12 @@ export interface Desk {
   manager_name: string | null
 }
 
+export interface Branch {
+  id: number
+  name: string
+  address: string
+}
+
 export interface SaleEvent {
   id: number
   name: string
@@ -72,6 +78,8 @@ export interface SaleEvent {
   phase: EventPhase
   ticket_count: number
   checked_in_count: number
+  branch_id: number | null
+  branch_name: string | null
 }
 
 export interface Ticket {
@@ -126,6 +134,7 @@ export interface PublicState {
     checkin_until: string
     company_name: string
     logo_url: string | null
+    branch_name: string | null
   }
   now: string
   call_timeout_minutes: number
@@ -156,6 +165,53 @@ export interface ActionResponse {
   ok: boolean
   message: string
   ticket: Ticket | null
+}
+
+export interface StatsDaily {
+  day: string
+  label: string
+  registered: number
+  arrived: number
+  served: number
+}
+
+export interface StatsEventRow {
+  id: number
+  name: string
+  branch_name: string | null
+  starts_at: string
+  registered: number
+  arrived: number
+  served: number
+  skipped: number
+}
+
+export interface StatsBranchRow {
+  id: number
+  name: string
+  events: number
+  registered: number
+  arrived: number
+  served: number
+}
+
+export interface StatsOverview {
+  days: number
+  totals: {
+    registered: number
+    arrived: number
+    served: number
+    skipped: number
+    cancelled: number
+    late: number
+    events: number
+  }
+  avg_wait_minutes: number | null
+  avg_service_minutes: number | null
+  daily: StatsDaily[]
+  hourly: { hour: number; registered: number }[]
+  events: StatsEventRow[]
+  branches: StatsBranchRow[]
 }
 
 export interface PublicTicket {
