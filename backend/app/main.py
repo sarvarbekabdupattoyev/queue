@@ -88,15 +88,28 @@ def create_app() -> FastAPI:
     async def domain_error_handler(_request: Request, exc: DomainError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
-    from app.api.routes import auth, company, desks, employees, events, public, queue, ws
+    from app.api.routes import (
+        auth,
+        branches,
+        company,
+        desks,
+        employees,
+        events,
+        public,
+        queue,
+        stats,
+        ws,
+    )
 
     for router in (
         auth.router,
         company.router,
         employees.router,
         desks.router,
+        branches.router,
         events.router,
         queue.router,
+        stats.router,
         public.router,
         ws.router,
     ):

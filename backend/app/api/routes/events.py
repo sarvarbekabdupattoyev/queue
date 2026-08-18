@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import String, cast, func, or_, select
 
 from app.api.deps import CompanyEvent, DbSession, OwnCompany, require_roles
-from app.models import Desk, SaleEvent, Ticket, TicketSource, TicketStatus, UserRole
+from app.models import Branch, Desk, SaleEvent, Ticket, TicketSource, TicketStatus, UserRole
 from app.schemas.event import EventCreate, EventOut, EventUpdate, SeedRequest, TicketOut
 from app.services import queue_service, ticket_service
 
@@ -19,7 +19,22 @@ SEED_NAMES = [
 ]
 
 
-async def _event_out(db: DbSession, event: SaleEvent) -> EventOut:
+async def _branch_names(db: DbSession, company_id: int) -> dict[int, str]:
+    rows = (
+        await db.execute(select(Branch.id, Branch.name).where(Branch.company_id == company_id))
+    ).all()
+    return dict(rows)
+
+
+async def _own_branch_or_400(db: DbSession, company_id: int, branch_id: int) -> None:
+    branch = await db.get(Branch, branch_id)
+    if branch is None or branch.company_id != company_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filial topilmadi")
+
+
+async def _event_out(
+    db: DbSession, event: SaleEvent, branch_names: dict[int, str] | None = None
+) -> EventOut:
     counts = (
         await db.execute(
             select(Ticket.status, func.count())
@@ -33,6 +48,8 @@ async def _event_out(db: DbSession, event: SaleEvent) -> EventOut:
         c for s, c in by_status.items()
         if s not in (TicketStatus.REGISTERED, TicketStatus.CANCELLED)
     )
+    if branch_names is None:
+        branch_names = await _branch_names(db, event.company_id)
     return EventOut(
         id=event.id,
         name=event.name,
@@ -43,6 +60,8 @@ async def _event_out(db: DbSession, event: SaleEvent) -> EventOut:
         phase=event.phase(),
         ticket_count=total,
         checked_in_count=checked_in,
+        branch_id=event.branch_id,
+        branch_name=branch_names.get(event.branch_id) if event.branch_id else None,
     )
 
 
@@ -62,16 +81,20 @@ async def list_events(db: DbSession, company: OwnCompany) -> list[EventOut]:
             .order_by(SaleEvent.starts_at.desc())
         )
     ).all()
-    return [await _event_out(db, e) for e in events]
+    branch_names = await _branch_names(db, company.id)
+    return [await _event_out(db, e, branch_names) for e in events]
 
 
 @router.post("", response_model=EventOut, status_code=status.HTTP_201_CREATED, dependencies=[OwnerOnly])
 async def create_event(payload: EventCreate, db: DbSession, company: OwnCompany) -> EventOut:
+    if payload.branch_id is not None:
+        await _own_branch_or_400(db, company.id, payload.branch_id)
     event = SaleEvent(
         company_id=company.id,
         name=payload.name.strip(),
         starts_at=payload.starts_at,
         checkin_until=payload.checkin_until,
+        branch_id=payload.branch_id,
     )
     db.add(event)
     await db.commit()
@@ -104,6 +127,11 @@ async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent)
         )
     if payload.is_active is not None:
         event.is_active = payload.is_active
+    if payload.clear_branch:
+        event.branch_id = None
+    elif payload.branch_id is not None:
+        await _own_branch_or_400(db, event.company_id, payload.branch_id)
+        event.branch_id = payload.branch_id
     await db.commit()
     await db.refresh(event)
     queue_service.schedule_event_broadcast(event.id)

@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.phone import normalize_phone, pretty_phone
 from app.db.base import now_utc
 from app.db.session import SessionFactory
-from app.models import SaleEvent, Ticket, TicketStatus
+from app.models import Branch, SaleEvent, Ticket, TicketStatus
 from app.services import queue_service, ticket_service
 from app.services.errors import DomainError
 from app.services.qr_service import qr_png_bytes_async
@@ -72,6 +72,19 @@ def _cap(value: str) -> str:
     return value[:1].upper() + value[1:] if value else value
 
 
+async def _branch_of(session: AsyncSession, event: SaleEvent) -> Branch | None:
+    """One bot serves every branch — the branch only tells the client where
+    this particular sale day happens."""
+    if event.branch_id is None:
+        return None
+    return await session.get(Branch, event.branch_id)
+
+
+def _event_label(event: SaleEvent, branch: Branch | None) -> str:
+    prefix = f"{branch.name} · " if branch else ""
+    return f"{prefix}{event.name} — {queue_service.fmt_local(event.starts_at)}"
+
+
 async def _open_events(session: AsyncSession, company_id: int) -> list[SaleEvent]:
     events = (
         await session.scalars(
@@ -103,9 +116,15 @@ async def _send_ticket(
     message: Message, session: AsyncSession, ticket: Ticket, intro: str = ""
 ) -> None:
     event = await session.get(SaleEvent, ticket.event_id)
+    branch = await _branch_of(session, event)
+    branch_line = ""
+    if branch is not None:
+        address = f" ({branch.address})" if branch.address else ""
+        branch_line = f"📍 {branch.name}{address}\n"
     caption = (
         f"{intro}🎫 Navbat raqamingiz: №{ticket.number}\n"
         f"🗓 {event.name} — {queue_service.fmt_local(event.starts_at)}\n"
+        f"{branch_line}"
         f"👤 {ticket.full_name}\n"
         f"📞 {pretty_phone(ticket.phone)}\n\n"
         f"Ofisga kelganda shu QR-kodni qabulxonada ko'rsating — kelganingiz qayd etiladi. "
@@ -179,20 +198,26 @@ async def cmd_start(message: Message, state: FSMContext, company_id: int) -> Non
             return
         if len(open_without_ticket) == 1:
             event = open_without_ticket[0]
+            branch = await _branch_of(session, event)
+            where = f" ({branch.name} filiali)" if branch else ""
             await state.set_state(Registration.first_name)
             await state.update_data(event_id=event.id)
             await message.answer(
-                f"Assalomu alaykum! «{event.name}» uchun onlayn navbat botiga xush kelibsiz.\n\n"
+                f"Assalomu alaykum! «{event.name}»{where} uchun onlayn navbat botiga "
+                "xush kelibsiz.\n\n"
                 "Ro'yxatdan o'tish uchun 3 ta ma'lumot kerak: ism, familiya va telefon raqam. "
                 "Bitta telefonga bitta navbat beriladi.\n\n1/3 — Ismingizni yozing:",
                 reply_markup=ReplyKeyboardRemove(),
             )
             return
+        # several open sale days (possibly at different branches) — the single
+        # company bot lists them all, labelled with their branch
+        branch_by_event = {e.id: await _branch_of(session, e) for e in open_without_ticket}
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=f"{e.name} — {queue_service.fmt_local(e.starts_at)}",
+                        text=_event_label(e, branch_by_event[e.id]),
                         callback_data=f"ev:{e.id}",
                     )
                 ]

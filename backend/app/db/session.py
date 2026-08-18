@@ -50,3 +50,21 @@ async def create_schema() -> None:
         if engine.dialect.name == "postgresql":
             await conn.execute(text("SELECT pg_advisory_xact_lock(752130421)"))
         await conn.run_sync(Base.metadata.create_all)
+        # create_all never alters existing tables — add columns introduced
+        # after a database was first created (poor man's forward migration)
+        if engine.dialect.name == "postgresql":
+            await conn.execute(
+                text(
+                    "ALTER TABLE sale_events ADD COLUMN IF NOT EXISTS branch_id INTEGER "
+                    "REFERENCES branches (id) ON DELETE SET NULL"
+                )
+            )
+        else:
+            columns = (await conn.execute(text("PRAGMA table_info(sale_events)"))).all()
+            if all(column[1] != "branch_id" for column in columns):
+                await conn.execute(
+                    text(
+                        "ALTER TABLE sale_events ADD COLUMN branch_id INTEGER "
+                        "REFERENCES branches (id) ON DELETE SET NULL"
+                    )
+                )

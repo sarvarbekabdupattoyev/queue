@@ -24,6 +24,11 @@ class SaleEvent(Base):
         ForeignKey("companies.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(120))
+    # optional: which branch (filial) hosts this sale day; the single company
+    # bot serves every branch, so this only labels where the sale happens
+    branch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     starts_at: Mapped[datetime] = mapped_column(UTCDateTime)
     checkin_until: Mapped[datetime] = mapped_column(UTCDateTime)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -36,6 +41,7 @@ class SaleEvent(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now_utc)
 
     company: Mapped["Company"] = relationship(back_populates="events")  # noqa: F821
+    branch: Mapped["Branch | None"] = relationship()  # noqa: F821
     tickets: Mapped[list["Ticket"]] = relationship(  # noqa: F821
         back_populates="event", cascade="all, delete-orphan"
     )

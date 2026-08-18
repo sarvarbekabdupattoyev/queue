@@ -23,6 +23,7 @@ from app.core.config import get_settings
 from app.db.base import now_utc
 from app.models import (
     LATE_ORDER_BASE,
+    Branch,
     Company,
     Desk,
     SaleEvent,
@@ -139,7 +140,9 @@ async def _stats(db: AsyncSession, event_id: int) -> dict[str, int]:
     }
 
 
-def _event_info(event: SaleEvent, company: Company | None) -> dict[str, Any]:
+def _event_info(
+    event: SaleEvent, company: Company | None, branch: Branch | None = None
+) -> dict[str, Any]:
     return {
         "id": event.id,
         "name": event.name,
@@ -148,6 +151,7 @@ def _event_info(event: SaleEvent, company: Company | None) -> dict[str, Any]:
         "checkin_until": event.checkin_until.isoformat(),
         "company_name": company.name if company else "",
         "logo_url": f"/media/{company.logo_path}" if company and company.logo_path else None,
+        "branch_name": branch.name if branch else None,
     }
 
 
@@ -156,6 +160,7 @@ async def build_states(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build the public (display) and staff payloads in one query pass."""
     company = await db.get(Company, event.company_id)
+    branch = await db.get(Branch, event.branch_id) if event.branch_id else None
     waiting = await waiting_tickets(db, event.id)
     active = await active_tickets(db, event.id)
     desk_numbers = await desk_numbers_for(db, active)
@@ -164,7 +169,7 @@ async def build_states(
 
     public_state: dict[str, Any] = {
         "type": "state",
-        "event": _event_info(event, company),
+        "event": _event_info(event, company, branch),
         "now": now_utc().isoformat(),
         "call_timeout_minutes": settings.call_timeout_minutes,
         "called": [

@@ -34,8 +34,13 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 - **Employees** — created by the owner with a **server-generated password** (shown once),
   roles: `manager` (desk panel) and `scanner` (reception check-in).
 - **Desks ("tables")** — numbered desks, optionally pinned to a manager.
+- **Branches (optional)** — a company may define branches (filiallar); events are pinned to a
+  branch, while **one Telegram bot serves every branch** (the bot labels each sale day with its
+  branch and shows the address on the ticket).
 - **Sale events** — many per company, each with its own dates, live phase
   (`registration → checkin → queue`) and an unguessable public display link.
+- **Owner statistics** — `/api/stats/overview` aggregates for the dashboard charts: daily
+  registrations/arrivals, hourly load, recent events and per-branch breakdown.
 - **Per-company Telegram bots** (aiogram): registration conversation (name → surname → phone via
   contact button), QR photo delivery, `/navbat` and `/holat` commands, push notifications on
   check-in / call / skip / finish.
@@ -171,7 +176,9 @@ the bot service falls back to long polling automatically.
 | POST/GET/PATCH | `/api/company` (+ `/logo`, `/phones`, `/locations`) | owner | company profile, bot token |
 | CRUD | `/api/employees` (+ `/reset-password`) | owner | staff with generated passwords |
 | CRUD | `/api/desks` | owner (read: staff) | manager desks |
-| CRUD | `/api/events` (+ `/state`, `/tickets`, `/seed`) | owner (read: staff) | sale events |
+| CRUD | `/api/branches` | owner (read: staff) | optional branches (one bot for all) |
+| CRUD | `/api/events` (+ `/state`, `/tickets`, `/seed`) | owner (read: staff) | sale events (optional `branch_id`) |
+| GET | `/api/stats/overview?days=N` | owner | dashboard chart aggregates |
 | POST | `/api/queue/{event}/checkin` | staff | QR code or 4-digit number |
 | POST | `/api/queue/{event}/call` · `recall` · `serving` · `skip` · `done` · `cancel` | manager/owner | desk actions |
 | GET | `/api/public/display/{code}` · `/api/public/tickets/{code}` | public | TV board, client ticket |

@@ -9,6 +9,7 @@ class EventCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     starts_at: datetime
     checkin_until: datetime
+    branch_id: int | None = None
 
     @model_validator(mode="after")
     def _check_window(self) -> "EventCreate":
@@ -24,6 +25,8 @@ class EventUpdate(BaseModel):
     starts_at: datetime | None = None
     checkin_until: datetime | None = None
     is_active: bool | None = None
+    branch_id: int | None = None
+    clear_branch: bool = False
 
 
 class EventOut(BaseModel):
@@ -38,6 +41,8 @@ class EventOut(BaseModel):
     phase: EventPhase
     ticket_count: int = 0
     checked_in_count: int = 0
+    branch_id: int | None = None
+    branch_name: str | None = None
 
 
 class TicketOut(BaseModel):
