@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { wsUrl } from '../api/client'
+import { IconExpand, IconSound } from '../components/icons'
 import type { PublicState } from '../api/types'
 import { formatCountdown, formatLongCountdown } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
@@ -151,7 +152,7 @@ export default function DisplayPage() {
                 <span>Navbat boshlanishiga qoldi</span>
               </div>
               <div className="big">{formatLongCountdown(untilQueue)}</div>
-              <p style={{ marginTop: '2vh', color: 'var(--dim)', fontSize: 'clamp(13px,2vh,26px)' }}>
+              <p style={{ marginTop: '2vh', color: 'var(--dsp-dim)', fontSize: 'clamp(13px,2vh,26px)' }}>
                 Kelganingizni qabulxonada QR-kod bilan belgilating.
                 <br />
                 Navbat tartibi — botdan ro‘yxatdan o‘tish vaqti bo‘yicha.
@@ -244,17 +245,16 @@ export default function DisplayPage() {
         </div>
         <div style={{ display: 'flex', gap: '0.6vw' }}>
           <button
-            className={`btn ghost sm${soundOn ? '' : ''}`}
-            style={soundOn ? { borderColor: 'var(--teal)', color: 'var(--teal)' } : undefined}
+            className={`btn ghost sm${soundOn ? ' on' : ''}`}
             onClick={() => {
               setSoundOn((s) => !s)
               if (!soundOn) chime()
             }}
           >
-            🔊 Ovoz
+            <IconSound size={15} /> Ovoz
           </button>
           <button className="btn ghost sm" onClick={toggleFullscreen}>
-            ⛶ To‘liq ekran (F)
+            <IconExpand size={15} /> To‘liq ekran (F)
           </button>
         </div>
       </footer>

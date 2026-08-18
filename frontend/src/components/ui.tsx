@@ -8,6 +8,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
+import { IconCopy, IconX, type IconProps } from './icons'
 
 export function Spinner() {
   return <div className="spinner" aria-label="Yuklanmoqda" />
@@ -29,26 +30,43 @@ export function Modal({
   }, [onClose])
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true">
-        <h2>{title}</h2>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-head">
+          <h2>{title}</h2>
+          <button type="button" className="icon-btn" aria-label="Yopish" onClick={onClose}>
+            <IconX size={16} />
+          </button>
+        </div>
         {children}
       </div>
     </div>
   )
 }
 
-export function Field({
-  label,
-  children,
-}: {
-  label: string
-  children: ReactNode
-}) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="field">
       <span>{label}</span>
       {children}
     </label>
+  )
+}
+
+export function EmptyState({
+  icon: Icon,
+  children,
+  action,
+}: {
+  icon?: (props: IconProps) => JSX.Element
+  children: ReactNode
+  action?: ReactNode
+}) {
+  return (
+    <div className="empty-state">
+      {Icon && <Icon size={34} />}
+      <p>{children}</p>
+      {action}
+    </div>
   )
 }
 
@@ -116,6 +134,7 @@ export function CopyButton({ text, label = 'Nusxalash' }: { text: string; label?
         }
       }}
     >
+      <IconCopy size={14} />
       {label}
     </button>
   )

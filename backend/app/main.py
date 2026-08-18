@@ -1,4 +1,4 @@
-"""NAVBAT API service.
+"""SmartNavbat API service.
 
 Single-process dev (no REDIS_URL): also embeds the Telegram bots and keeps WS
 rooms in memory — run exactly one worker.
@@ -45,10 +45,10 @@ async def lifespan(app: FastAPI):
     if settings.multi_process:
         # bots run in the dedicated bot service; this worker only relays WS
         subscriber = asyncio.create_task(ws_manager.run_subscriber(), name="ws-sub")
-        log.info("NAVBAT API worker started (multi-process mode)")
+        log.info("SmartNavbat API worker started (multi-process mode)")
     else:
         await bot_manager.start_all()
-        log.info("NAVBAT API started (single-process mode, embedded bots)")
+        log.info("SmartNavbat API started (single-process mode, embedded bots)")
 
     yield
 
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="NAVBAT API",
+        title="SmartNavbat API",
         version="1.0.0",
         lifespan=lifespan,
         docs_url="/api/docs",

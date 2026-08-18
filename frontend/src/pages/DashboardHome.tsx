@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Desk, SaleEvent, User } from '../api/types'
 import { useCompany } from '../components/DashboardLayout'
+import { IconCheck } from '../components/icons'
 import { Spinner } from '../components/ui'
 import { formatDateTime } from '../lib/format'
 import { PHASE_LABEL } from './EventsPage'
@@ -43,14 +44,19 @@ export default function DashboardHome() {
 
       {pending.length > 0 && (
         <div className="card">
-          <div className="card-title">Ishga tayyorlash ({setupSteps.length - pending.length}/{setupSteps.length})</div>
+          <div className="card-title">
+            Ishga tayyorlash ({setupSteps.length - pending.length}/{setupSteps.length})
+          </div>
           {setupSteps.map((step) => (
-            <div className="list-row" key={step.label}>
-              <span>
-                {step.done ? '✅' : '⬜'} {step.label}
+            <div className="check-row" key={step.label}>
+              <span className={`lbl${step.done ? ' done-text' : ''}`}>
+                <span className={`mark ${step.done ? 'done' : 'todo'}`}>
+                  <IconCheck size={13} />
+                </span>
+                {step.label}
               </span>
               {!step.done && (
-                <Link className="btn ghost sm" to={step.to}>
+                <Link className="btn tonal sm" to={step.to}>
                   Bajarish
                 </Link>
               )}

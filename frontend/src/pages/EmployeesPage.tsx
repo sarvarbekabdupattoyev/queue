@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { EmployeeWithPassword, Role, User } from '../api/types'
+import { IconPlus } from '../components/icons'
 import { ActionForm, CopyButton, Field, Modal, Spinner, useToast } from '../components/ui'
 import { prettyPhone } from '../lib/format'
 
@@ -85,7 +86,7 @@ export default function EmployeesPage() {
           <div className="sub">Menejerlar stollarda mijoz chaqiradi, skanerlar qabulxonada QR o‘qiydi</div>
         </div>
         <button className="btn" onClick={() => setCreating(true)}>
-          + Xodim qo‘shish
+          <IconPlus size={16} /> Xodim qo‘shish
         </button>
       </div>
 
@@ -137,7 +138,7 @@ export default function EmployeesPage() {
                         {employee.is_active ? 'Bloklash' : 'Faollashtirish'}
                       </button>{' '}
                       <button
-                        className="btn coral sm"
+                        className="btn danger-ghost sm"
                         onClick={() => {
                           if (window.confirm(`${employee.first_name} o‘chirilsinmi?`)) remove.mutate(employee)
                         }}

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { Desk, User } from '../api/types'
+import { IconPlus } from '../components/icons'
 import { ActionForm, Field, Modal, Spinner, useToast } from '../components/ui'
 
 export default function DesksPage() {
@@ -48,7 +49,7 @@ export default function DesksPage() {
           <div className="sub">Har bir menejer stoli — mijozlar shu stollarga chaqiriladi</div>
         </div>
         <button className="btn" onClick={openNew}>
-          + Stol qo‘shish
+          <IconPlus size={16} /> Stol qo‘shish
         </button>
       </div>
 
@@ -79,7 +80,7 @@ export default function DesksPage() {
                         Tahrirlash
                       </button>{' '}
                       <button
-                        className="btn coral sm"
+                        className="btn danger-ghost sm"
                         onClick={() => {
                           if (window.confirm(`${desk.number}-stol o‘chirilsinmi?`)) remove.mutate(desk)
                         }}

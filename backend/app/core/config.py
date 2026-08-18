@@ -11,7 +11,7 @@ class Settings(BaseSettings):
         env_file=BASE_DIR / ".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    app_name: str = "NAVBAT"
+    app_name: str = "SmartNavbat"
     debug: bool = False
 
     # sqlite for local development; postgresql+asyncpg://... in production
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # Webhook mode for the bot service. Empty → long polling (dev / simple
     # deployments). Set to the public base URL routed to the bot service,
-    # e.g. https://example.com/tgwh — each bot is registered at
+    # e.g. https://smartnavbat.uz/tgwh — each bot is registered at
     # {base}/{company_id} with a per-company secret token.
     bot_webhook_base: str = ""
     # Max updates processed concurrently by the bot service (protects the

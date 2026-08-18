@@ -5,7 +5,7 @@ x-backend-env: &backend-env
   TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-1}
   CALL_TIMEOUT_MINUTES: ${CALL_TIMEOUT_MINUTES:-3}
   # Set to your public HTTPS base for webhook mode (recommended for bursts),
-  # e.g. https://example.com/tgwh — leave empty for long polling.
+  # e.g. https://smartnavbat.uz/tgwh — leave empty for long polling.
   BOT_WEBHOOK_BASE: ${BOT_WEBHOOK_BASE:-}
   BOT_MAX_CONCURRENT_UPDATES: ${BOT_MAX_CONCURRENT_UPDATES:-64}
   DB_POOL_SIZE: ${DB_POOL_SIZE:-10}

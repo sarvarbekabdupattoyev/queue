@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { homeFor, useAuth } from '../auth/AuthContext'
+import { ThemeToggle } from '../components/ThemeToggle'
+import { Wordmark } from '../components/icons'
 import { ActionForm, Field } from '../components/ui'
 
 export default function LoginPage() {
@@ -13,13 +15,14 @@ export default function LoginPage() {
 
   return (
     <div className="auth-shell">
+      <div className="auth-corner">
+        <ThemeToggle />
+      </div>
       <div className="auth-card">
         <div className="brand">
-          <div className="brand-mark">
-            NAV<span>BAT</span>
-          </div>
-          <div className="brand-sub">Onlayn navbat tizimi</div>
+          <Wordmark size={34} stacked />
         </div>
+        <p className="brand-sub">Sotuv kunlari uchun onlayn navbat tizimi</p>
         <ActionForm
           onSubmit={async () => {
             const logged = await login(phone, password)
@@ -49,10 +52,10 @@ export default function LoginPage() {
                 />
               </Field>
               {error && <div className="error-text">{error}</div>}
-              <button className="btn full big" style={{ marginTop: 10 }} disabled={busy}>
+              <button className="btn full big" style={{ marginTop: 12 }} disabled={busy}>
                 {busy ? 'Kirilmoqda…' : 'Kirish'}
               </button>
-              <p className="hint" style={{ textAlign: 'center', marginTop: 16 }}>
+              <p className="auth-foot">
                 Kompaniyangiz yo‘qmi? <Link to="/register">Ro‘yxatdan o‘ting</Link>
               </p>
             </>

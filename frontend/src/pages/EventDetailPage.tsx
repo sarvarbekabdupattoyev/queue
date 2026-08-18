@@ -227,7 +227,7 @@ export default function EventDetailPage() {
                         )}{' '}
                         {!['done', 'cancelled'].includes(ticket.status) && (
                           <button
-                            className="btn coral sm"
+                            className="btn danger-ghost sm"
                             onClick={() => {
                               if (window.confirm(`№${ticket.number} bekor qilinsinmi?`))
                                 cancelTicket.mutate(ticket.number)

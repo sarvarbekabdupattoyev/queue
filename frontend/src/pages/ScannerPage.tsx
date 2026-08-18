@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, getToken, wsUrl } from '../api/client'
 import type { CheckinResponse, StaffState } from '../api/types'
 import { StaffShell } from '../components/StaffShell'
+import { IconCamera } from '../components/icons'
 import { formatLongCountdown, formatTime } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
@@ -208,7 +209,7 @@ export default function ScannerPage() {
                   </>
                 ) : (
                   <button className="btn ghost full" onClick={() => { setCameraError(null); setCameraOn(true) }}>
-                    📷 Kamera bilan skanerlash
+                    <IconCamera size={17} /> Kamera bilan skanerlash
                   </button>
                 )}
                 {cameraError && <div className="error-text">{cameraError}</div>}

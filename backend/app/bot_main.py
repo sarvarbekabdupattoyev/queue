@@ -1,4 +1,4 @@
-"""NAVBAT bot service — the single process that talks to Telegram.
+"""SmartNavbat bot service — the single process that talks to Telegram.
 
 Run with:  uvicorn app.bot_main:app --port 8081
 
@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
-app = FastAPI(title="NAVBAT Bot Service", lifespan=lifespan, docs_url=None, openapi_url=None)
+app = FastAPI(title="SmartNavbat Bot Service", lifespan=lifespan, docs_url=None, openapi_url=None)
 
 
 @app.post("/tgwh/{company_id}")

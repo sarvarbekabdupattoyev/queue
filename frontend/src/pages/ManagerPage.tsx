@@ -4,6 +4,13 @@ import { api, getToken, wsUrl } from '../api/client'
 import type { Desk, StaffState, ActionResponse } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { StaffShell } from '../components/StaffShell'
+import {
+  IconBell,
+  IconCheck,
+  IconFlag,
+  IconMegaphone,
+  IconSkip,
+} from '../components/icons'
 import { useToast } from '../components/ui'
 import { formatCountdown, formatLongCountdown } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
@@ -111,7 +118,7 @@ export default function ManagerPage() {
                 </p>
               )}
               <div className="current-ticket">
-                <div className={`n${mine ? '' : ' empty'}`}>{mine ? mine.number : 'Bo‘sh'}</div>
+                <div className={`n${mine ? '' : ' empty-n'}`}>{mine ? mine.number : 'Bo‘sh'}</div>
                 <div>
                   <div className="who">{mine ? mine.name : 'Hozircha mijoz yo‘q'}</div>
                   <div className="meta">
@@ -134,14 +141,14 @@ export default function ManagerPage() {
                   disabled={busy || !!mine || !deskId || !queueStarted}
                   onClick={() => act('call', { desk_id: deskId })}
                 >
-                  📣 Keyingini chaqirish
+                  <IconMegaphone size={19} /> Keyingini chaqirish
                 </button>
                 <button
                   className="btn teal big"
                   disabled={busy || mine?.status !== 'called'}
                   onClick={() => mine && act('serving', { number: mine.number })}
                 >
-                  ✅ Keldi
+                  <IconCheck size={18} /> Keldi
                 </button>
                 <button
                   className="btn coral big"
@@ -150,21 +157,21 @@ export default function ManagerPage() {
                     mine && act('skip', { number: mine.number }, `№${mine.number} kelmadi — o‘tkazib yuborilsinmi?`)
                   }
                 >
-                  ⏭ Kelmadi
+                  <IconSkip size={18} /> Kelmadi
                 </button>
                 <button
                   className="btn ghost big"
                   disabled={busy || mine?.status !== 'called'}
                   onClick={() => mine && act('recall', { number: mine.number })}
                 >
-                  🔔 Takror chaqirish
+                  <IconBell size={18} /> Takror chaqirish
                 </button>
                 <button
                   className="btn amber big"
                   disabled={busy || !mine}
                   onClick={() => mine && act('done', { number: mine.number })}
                 >
-                  🏁 Yakunlash
+                  <IconFlag size={18} /> Yakunlash
                 </button>
               </div>
               {state && (

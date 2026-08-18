@@ -1,4 +1,4 @@
-# NAVBAT — Queue Management System
+# SmartNavbat — smartnavbat.uz
 
 Multi-tenant online queue platform for sale days ("sotuv kuni"): clients register through a
 company's **Telegram bot** and receive a **random 4-digit number + QR code**; on the sale day they
@@ -143,7 +143,7 @@ service, and nginx. Postgres data, Redis AOF, and uploaded logos live in
 named volumes.
 
 **Telegram webhook mode (recommended for sale-day bursts):** put the stack
-behind HTTPS, set `BOT_WEBHOOK_BASE=https://your-domain/tgwh` in `.env` and
+behind HTTPS, set `BOT_WEBHOOK_BASE=https://smartnavbat.uz/tgwh` in `.env` and
 restart the bot service. Each company bot is registered at
 `{base}/{company_id}` with a per-company HMAC secret; without a public URL
 the bot service falls back to long polling automatically.

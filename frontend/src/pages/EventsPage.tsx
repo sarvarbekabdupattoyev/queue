@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { EventPhase, SaleEvent } from '../api/types'
+import { IconPlus } from '../components/icons'
 import { ActionForm, Field, Modal, Spinner, useToast } from '../components/ui'
 import { formatDateTime, isoToLocalInput, localInputToIso } from '../lib/format'
 
@@ -66,7 +67,7 @@ export default function EventsPage() {
           </div>
         </div>
         <button className="btn" onClick={openNew}>
-          + Tadbir qo‘shish
+          <IconPlus size={16} /> Tadbir qo‘shish
         </button>
       </div>
 
@@ -120,7 +121,7 @@ export default function EventsPage() {
                           {event.is_active ? 'Yopish' : 'Ochish'}
                         </button>{' '}
                         <button
-                          className="btn coral sm"
+                          className="btn danger-ghost sm"
                           onClick={() => {
                             if (
                               window.confirm(
