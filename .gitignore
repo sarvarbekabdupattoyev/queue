@@ -1,2 +1,7 @@
 .env
 .DS_Store
+
+# local runtime / deploy artifacts
+*.log
+tunnel_url.txt
+demo_display_code.txt
