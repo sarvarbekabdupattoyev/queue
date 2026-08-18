@@ -1,0 +1,104 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+
+from app.api.deps import CurrentUser, DbSession, OwnCompany, require_roles
+from app.core.security import generate_password, hash_password
+from app.models import User, UserRole
+from app.schemas.auth import UserOut
+from app.schemas.staff import EmployeeCreate, EmployeeUpdate, EmployeeWithPassword
+
+router = APIRouter(
+    prefix="/employees", tags=["employees"], dependencies=[Depends(require_roles(UserRole.OWNER))]
+)
+
+EMPLOYEE_ROLES = (UserRole.MANAGER, UserRole.SCANNER)
+
+
+async def _get_employee(db: DbSession, company_id: int, employee_id: int) -> User:
+    employee = await db.get(User, employee_id)
+    if (
+        employee is None
+        or employee.company_id != company_id
+        or employee.role not in EMPLOYEE_ROLES
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Xodim topilmadi")
+    return employee
+
+
+@router.get("", response_model=list[UserOut])
+async def list_employees(db: DbSession, company: OwnCompany) -> list[UserOut]:
+    employees = (
+        await db.scalars(
+            select(User)
+            .where(User.company_id == company.id, User.role.in_(EMPLOYEE_ROLES))
+            .order_by(User.created_at)
+        )
+    ).all()
+    return [UserOut.model_validate(e) for e in employees]
+
+
+@router.post("", response_model=EmployeeWithPassword, status_code=status.HTTP_201_CREATED)
+async def create_employee(
+    payload: EmployeeCreate, db: DbSession, company: OwnCompany
+) -> EmployeeWithPassword:
+    if payload.role not in EMPLOYEE_ROLES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Xodim roli faqat 'manager' yoki 'scanner' bo'ladi"
+        )
+    existing = await db.scalar(select(User.id).where(User.phone == payload.phone))
+    if existing is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam allaqachon ro'yxatdan o'tgan")
+    password = generate_password()
+    employee = User(
+        phone=payload.phone,
+        password_hash=hash_password(password),
+        first_name=payload.first_name.strip(),
+        last_name=payload.last_name.strip(),
+        role=payload.role,
+        company_id=company.id,
+    )
+    db.add(employee)
+    await db.commit()
+    await db.refresh(employee)
+    # The plain password is returned exactly once; only the hash is stored.
+    return EmployeeWithPassword(employee=UserOut.model_validate(employee), password=password)
+
+
+@router.patch("/{employee_id}", response_model=UserOut)
+async def update_employee(
+    employee_id: int, payload: EmployeeUpdate, db: DbSession, company: OwnCompany
+) -> UserOut:
+    employee = await _get_employee(db, company.id, employee_id)
+    if payload.role is not None:
+        if payload.role not in EMPLOYEE_ROLES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Xodim roli faqat 'manager' yoki 'scanner' bo'ladi"
+            )
+        employee.role = payload.role
+    if payload.first_name is not None:
+        employee.first_name = payload.first_name.strip()
+    if payload.last_name is not None:
+        employee.last_name = payload.last_name.strip()
+    if payload.is_active is not None:
+        employee.is_active = payload.is_active
+    await db.commit()
+    await db.refresh(employee)
+    return UserOut.model_validate(employee)
+
+
+@router.post("/{employee_id}/reset-password", response_model=EmployeeWithPassword)
+async def reset_password(
+    employee_id: int, db: DbSession, company: OwnCompany
+) -> EmployeeWithPassword:
+    employee = await _get_employee(db, company.id, employee_id)
+    password = generate_password()
+    employee.password_hash = hash_password(password)
+    await db.commit()
+    return EmployeeWithPassword(employee=UserOut.model_validate(employee), password=password)
+
+
+@router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_employee(employee_id: int, db: DbSession, company: OwnCompany) -> None:
+    employee = await _get_employee(db, company.id, employee_id)
+    await db.delete(employee)
+    await db.commit()
