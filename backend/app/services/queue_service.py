@@ -6,6 +6,10 @@ manual number entry) until ``event.checkin_until``. When that moment passes the
 queue starts, and the order among checked-in tickets is the **bot registration
 time** — not the number and not the arrival time. Tickets checked in after the
 deadline (or returning after a skip) join the end-of-day group.
+
+Side effects of every action are decoupled from the request path:
+state broadcasts are debounced (`app.services.broadcast`) and Telegram
+notifications are routed through `app.services.notify`.
 """
 
 from datetime import datetime
@@ -25,8 +29,9 @@ from app.models import (
     Ticket,
     TicketStatus,
 )
+from app.services import notify
+from app.services.broadcast import schedule_event_broadcast
 from app.services.errors import ConflictError, DomainError, NotFoundError
-from app.ws.manager import ws_manager
 
 TASHKENT = ZoneInfo("Asia/Tashkent")
 
@@ -51,6 +56,16 @@ def _waiting_stmt(event_id: int):
 
 async def waiting_tickets(db: AsyncSession, event_id: int) -> list[Ticket]:
     return list((await db.scalars(_waiting_stmt(event_id))).all())
+
+
+async def waiting_count(db: AsyncSession, event_id: int) -> int:
+    return (
+        await db.scalar(
+            select(func.count())
+            .select_from(Ticket)
+            .where(Ticket.event_id == event_id, Ticket.status == TicketStatus.CHECKED_IN)
+        )
+    ) or 0
 
 
 async def active_tickets(db: AsyncSession, event_id: int) -> list[Ticket]:
@@ -88,6 +103,14 @@ async def get_ticket_by_number(db: AsyncSession, event_id: int, number: int) -> 
     if ticket is None:
         raise NotFoundError("Bunday raqamli navbat topilmadi")
     return ticket
+
+
+async def desk_numbers_for(db: AsyncSession, tickets: list[Ticket]) -> dict[int, int]:
+    desk_ids = {t.desk_id for t in tickets if t.desk_id is not None}
+    if not desk_ids:
+        return {}
+    rows = (await db.execute(select(Desk.id, Desk.number).where(Desk.id.in_(desk_ids)))).all()
+    return dict(rows)
 
 
 # ----------------------------------------------------------- state payloads ---
@@ -128,13 +151,18 @@ def _event_info(event: SaleEvent, company: Company | None) -> dict[str, Any]:
     }
 
 
-async def build_public_state(db: AsyncSession, event: SaleEvent) -> dict[str, Any]:
+async def build_states(
+    db: AsyncSession, event: SaleEvent
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build the public (display) and staff payloads in one query pass."""
     company = await db.get(Company, event.company_id)
     waiting = await waiting_tickets(db, event.id)
     active = await active_tickets(db, event.id)
     desk_numbers = await desk_numbers_for(db, active)
+    stats = await _stats(db, event.id)
     settings = get_settings()
-    return {
+
+    public_state: dict[str, Any] = {
         "type": "state",
         "event": _event_info(event, company),
         "now": now_utc().isoformat(),
@@ -150,15 +178,8 @@ async def build_public_state(db: AsyncSession, event: SaleEvent) -> dict[str, An
         ],
         "next": [t.number for t in waiting[:12]],
         "late_numbers": [t.number for t in waiting[:12] if t.late],
-        "stats": await _stats(db, event.id),
+        "stats": stats,
     }
-
-
-async def build_staff_state(db: AsyncSession, event: SaleEvent) -> dict[str, Any]:
-    state = await build_public_state(db, event)
-    waiting = await waiting_tickets(db, event.id)
-    active = await active_tickets(db, event.id)
-    desk_numbers = await desk_numbers_for(db, active)
 
     def staff_view(t: Ticket, position: int | None = None) -> dict[str, Any]:
         return {
@@ -176,24 +197,22 @@ async def build_staff_state(db: AsyncSession, event: SaleEvent) -> dict[str, Any
             "position": position,
         }
 
-    state["waiting_list"] = [staff_view(t, i + 1) for i, t in enumerate(waiting)]
-    state["active"] = [staff_view(t) for t in active]
-    return state
+    staff_state: dict[str, Any] = {
+        **public_state,
+        "waiting_list": [staff_view(t, i + 1) for i, t in enumerate(waiting)],
+        "active": [staff_view(t) for t in active],
+    }
+    return public_state, staff_state
 
 
-async def desk_numbers_for(db: AsyncSession, tickets: list[Ticket]) -> dict[int, int]:
-    desk_ids = {t.desk_id for t in tickets if t.desk_id is not None}
-    if not desk_ids:
-        return {}
-    rows = (await db.execute(select(Desk.id, Desk.number).where(Desk.id.in_(desk_ids)))).all()
-    return dict(rows)
+async def build_public_state(db: AsyncSession, event: SaleEvent) -> dict[str, Any]:
+    public_state, _ = await build_states(db, event)
+    return public_state
 
 
-async def broadcast_event(db: AsyncSession, event: SaleEvent) -> None:
-    public_state = await build_public_state(db, event)
-    staff_state = await build_staff_state(db, event)
-    await ws_manager.broadcast(f"display:{event.id}", public_state)
-    await ws_manager.broadcast(f"staff:{event.id}", staff_state)
+async def build_staff_state(db: AsyncSession, event: SaleEvent) -> dict[str, Any]:
+    _, staff_state = await build_states(db, event)
+    return staff_state
 
 
 # ----------------------------------------------------------- notifications ---
@@ -201,9 +220,7 @@ async def broadcast_event(db: AsyncSession, event: SaleEvent) -> None:
 async def _notify(event: SaleEvent, ticket: Ticket, text: str) -> None:
     if ticket.telegram_chat_id is None:
         return
-    from app.services.telegram.manager import bot_manager
-
-    await bot_manager.send_text(event.company_id, ticket.telegram_chat_id, text)
+    await notify.send_telegram_text(event.company_id, ticket.telegram_chat_id, text)
 
 
 # ----------------------------------------------------------------- actions ---
@@ -243,7 +260,7 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
                 f"✅ Qayd etildi (№{ticket.number}). Skanerlash vaqti tugagani uchun kun "
                 f"oxiri navbatiga qo'shildingiz — sizdan oldin {position - 1} kishi bor."
             )
-        await broadcast_event(db, event)
+        schedule_event_broadcast(event.id)
         await _notify(event, ticket, message)
         kind = "late" if ticket.late else "arrived"
         return {"ok": True, "kind": kind, "message": "Keldi belgilandi", "ticket": ticket}
@@ -252,7 +269,7 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
         if ticket.skip_count >= 2:
             ticket.status = TicketStatus.CANCELLED
             await db.commit()
-            await broadcast_event(db, event)
+            schedule_event_broadcast(event.id)
             await _notify(
                 event,
                 ticket,
@@ -271,7 +288,7 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
         ticket.checked_in_at = now
         await db.commit()
         position = await position_of(db, ticket)
-        await broadcast_event(db, event)
+        schedule_event_broadcast(event.id)
         await _notify(
             event,
             ticket,
@@ -330,7 +347,7 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
     ticket.called_at = now_utc()
     ticket.call_count += 1
     await db.commit()
-    await broadcast_event(db, event)
+    schedule_event_broadcast(event.id)
     await _notify(
         event,
         ticket,
@@ -347,7 +364,7 @@ async def recall(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.called_at = now_utc()
     ticket.call_count += 1
     await db.commit()
-    await broadcast_event(db, event)
+    schedule_event_broadcast(event.id)
     desk_number = desk.number if desk else "?"
     await _notify(
         event,
@@ -362,7 +379,7 @@ async def start_serving(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> T
         raise DomainError("Faqat chaqirilgan mijozni qabul qilish mumkin")
     ticket.status = TicketStatus.SERVING
     await db.commit()
-    await broadcast_event(db, event)
+    schedule_event_broadcast(event.id)
     return ticket
 
 
@@ -373,7 +390,7 @@ async def skip(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.skip_count += 1
     ticket.desk_id = None
     await db.commit()
-    await broadcast_event(db, event)
+    schedule_event_broadcast(event.id)
     if ticket.skip_count >= 2:
         text = (
             "⏭ Chaqiruvda yana bo'lmadingiz. Kun oxiri navbati faqat bir marta beriladi — "
@@ -394,7 +411,7 @@ async def finish(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.status = TicketStatus.DONE
     ticket.finished_at = now_utc()
     await db.commit()
-    await broadcast_event(db, event)
+    schedule_event_broadcast(event.id)
     await _notify(
         event,
         ticket,
@@ -409,6 +426,6 @@ async def cancel(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.status = TicketStatus.CANCELLED
     ticket.desk_id = None
     await db.commit()
-    await broadcast_event(db, event)
+    schedule_event_broadcast(event.id)
     await _notify(event, ticket, f"Navbatingiz (№{ticket.number}) administrator tomonidan bekor qilindi.")
     return ticket

@@ -18,7 +18,8 @@ from app.schemas.company import (
     CompanyUpdate,
 )
 from app.services.errors import DomainError
-from app.services.telegram.manager import bot_manager
+from app.services.notify import notify_bot_token_changed
+from app.services.telegram.manager import bot_manager, validate_token
 
 router = APIRouter(prefix="/company", tags=["company"])
 
@@ -70,15 +71,24 @@ async def get_company(db: DbSession, company: OwnCompany) -> CompanyOut:
 async def update_company(payload: CompanyUpdate, db: DbSession, company: OwnCompany) -> CompanyOut:
     if payload.name is not None:
         company.name = payload.name.strip()
-    if payload.telegram_bot_token is not None:
+    token_changed = payload.telegram_bot_token is not None
+    if token_changed:
         token = payload.telegram_bot_token.strip() or None
+        settings = get_settings()
         try:
-            username = await bot_manager.set_token(company.id, token)
+            if settings.multi_process:
+                # API workers never run bots: validate statelessly, the bot
+                # service picks the change up via the Redis control channel.
+                username = await validate_token(token) if token else None
+            else:
+                username = await bot_manager.set_token(company.id, token)
         except DomainError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, exc.message) from None
         company.telegram_bot_token = token
         company.telegram_bot_username = username
     await db.commit()
+    if token_changed:
+        await notify_bot_token_changed(company.id)
     return await _company_out(db, company)
 
 

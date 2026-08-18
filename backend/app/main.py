@@ -1,3 +1,14 @@
+"""NAVBAT API service.
+
+Single-process dev (no REDIS_URL): also embeds the Telegram bots and keeps WS
+rooms in memory — run exactly one worker.
+
+Production (REDIS_URL set): run ``uvicorn app.main:app --workers N``. Bots
+live in the separate bot service (``app.bot_main``); WS broadcasts fan out
+through Redis pub/sub so any worker reaches every connected screen.
+"""
+
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,10 +19,13 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
-from app.db.base import Base
-from app.db.session import engine
+from app.core.redis import close_redis
+from app.db.session import create_schema, engine
+from app.services import broadcast
 from app.services.errors import DomainError
+from app.services.qr_service import shutdown_qr_pool
 from app.services.telegram.manager import bot_manager
+from app.ws.manager import ws_manager
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -22,16 +36,33 @@ log = logging.getLogger("navbat")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    db_path = settings.database_url.split("///")[-1]
     if settings.database_url.startswith("sqlite"):
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        Path(settings.database_url.split("///")[-1]).parent.mkdir(parents=True, exist_ok=True)
+    await create_schema()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    await bot_manager.start_all()
-    log.info("NAVBAT backend started")
+
+    subscriber: asyncio.Task | None = None
+    if settings.multi_process:
+        # bots run in the dedicated bot service; this worker only relays WS
+        subscriber = asyncio.create_task(ws_manager.run_subscriber(), name="ws-sub")
+        log.info("NAVBAT API worker started (multi-process mode)")
+    else:
+        await bot_manager.start_all()
+        log.info("NAVBAT API started (single-process mode, embedded bots)")
+
     yield
-    await bot_manager.stop_all()
+
+    if subscriber is not None:
+        subscriber.cancel()
+        try:
+            await subscriber
+        except (asyncio.CancelledError, Exception):
+            pass
+    await broadcast.shutdown()
+    if not settings.multi_process:
+        await bot_manager.stop_all()
+    shutdown_qr_pool()
+    await close_redis()
     await engine.dispose()
 
 

@@ -1,15 +1,14 @@
 from collections.abc import AsyncIterator
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
 
 settings = get_settings()
 
-engine = create_async_engine(settings.database_url, echo=False)
-
-if engine.dialect.name == "sqlite":
+if settings.database_url.startswith("sqlite"):
+    engine = create_async_engine(settings.database_url, echo=False)
 
     @event.listens_for(engine.sync_engine, "connect")
     def _sqlite_pragmas(dbapi_connection, _record):
@@ -19,6 +18,18 @@ if engine.dialect.name == "sqlite":
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
+else:
+    # PostgreSQL: a real pool sized for burst traffic. Total connections =
+    # workers × (pool_size + max_overflow); keep it under the server's limit.
+    engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
+
 
 SessionFactory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -26,3 +37,15 @@ SessionFactory = async_sessionmaker(engine, expire_on_commit=False, class_=Async
 async def get_db() -> AsyncIterator[AsyncSession]:
     async with SessionFactory() as session:
         yield session
+
+
+async def create_schema() -> None:
+    """Create tables on startup. Under Postgres with several uvicorn workers
+    this races, so it is serialized with an advisory lock. (For evolving
+    production schemas, switch to Alembic migrations.)"""
+    from app.db.base import Base
+
+    async with engine.begin() as conn:
+        if engine.dialect.name == "postgresql":
+            await conn.execute(text("SELECT pg_advisory_xact_lock(752130421)"))
+        await conn.run_sync(Base.metadata.create_all)

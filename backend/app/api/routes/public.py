@@ -4,7 +4,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession
 from app.models import SaleEvent, Ticket
 from app.services import queue_service
-from app.services.qr_service import qr_data_url
+from app.services.qr_service import qr_data_url_async
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -28,16 +28,15 @@ async def ticket_state(code: str, db: DbSession) -> dict:
     event = await db.get(SaleEvent, ticket.event_id)
     position = await queue_service.position_of(db, ticket)
     desk_numbers = await queue_service.desk_numbers_for(db, [ticket])
-    waiting = await queue_service.waiting_tickets(db, event.id)
     return {
         "number": ticket.number,
         "first_name": ticket.first_name,
         "status": ticket.status.value,
         "late": ticket.late,
         "position": position,
-        "waiting_count": len(waiting),
+        "waiting_count": await queue_service.waiting_count(db, event.id),
         "desk_number": desk_numbers.get(ticket.desk_id),
-        "qr": qr_data_url(ticket.code),
+        "qr": await qr_data_url_async(ticket.code),
         "event": {
             "name": event.name,
             "phase": event.phase().value,

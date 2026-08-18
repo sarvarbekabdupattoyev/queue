@@ -49,17 +49,59 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
   live waiting list.
 - **Client ticket page** — `/t/{code}` public status page with QR, position and desk.
 
+## Architecture
+
+Built for registration bursts of 1000–2000 bot requests in a few seconds:
+
+```
+                nginx (TLS, WS upgrade, SPA, rate limits)
+                       │
+       ┌───────────────┼───────────────────┐
+       │               │                   │
+  API workers ×N   Bot service         static SPA
+  (uvicorn)        (webhook or polling,
+       │            exactly 1 replica)
+       └──────┬────────┴──── Redis (FSM state · WS pub/sub · notifications)
+              │
+         PostgreSQL (asyncpg, pooled)
+```
+
+Key decisions:
+
+- **PostgreSQL in production** — SQLite stays a dev-only default (single
+  writer); the compose stack runs Postgres with a sized asyncpg pool.
+- **The bot is its own service** (`app.bot_main`) — the only process talking
+  to Telegram, so N API workers never fight over polling (no 409s). Webhook
+  mode ACKs Telegram instantly and processes updates in semaphore-bounded
+  tasks; long polling remains the zero-config fallback.
+- **Redis pub/sub for WebSockets** — every API worker relays broadcasts to
+  the sockets it holds, so `--workers N` reaches every screen.
+- **RedisStorage for the bot FSM** — half-finished registrations survive
+  restarts; keys are bot-scoped so tenants never collide.
+- **Debounced state broadcasts** — a burst marks an event dirty thousands of
+  times, screens get at most one rebuilt state per 200 ms window
+  (measured: 2000 registrations → ~36 pushes instead of 4000).
+- **CPU off the event loop** — QR rendering (pure-Python matrix build, GIL)
+  runs in a small process pool; bcrypt runs in threads.
+- Measured on 4 shared cores: **2000 registrations in ~9 s end-to-end**
+  (DB path alone: 364 reg/s) — well above Telegram's own ~30 msg/s per-bot
+  delivery cap, which is the real-world ceiling for sending 2000 QR photos.
+
 ## Repository layout
 
 ```
 backend/            FastAPI app
-  app/core/         settings, JWT, password hashing, phone normalization
+  app/core/         settings, JWT, password hashing, phones, Redis client
   app/models/       SQLAlchemy 2.0 models (User, Company, Desk, SaleEvent, Ticket)
-  app/services/     queue logic, ticket numbers, QR, Telegram bot manager + handlers
+  app/services/     queue logic, ticket numbers, QR (process pool), debounced
+                    broadcasts, notify routing, Telegram bot manager + handlers
   app/api/routes/   auth, company, employees, desks, events, queue, public, ws
-  tests/            pytest suite for the queue rules
+  app/main.py       API service (embedded bots in single-process dev mode)
+  app/bot_main.py   bot service (webhook receiver / poller, notify consumer)
+  tests/            pytest suite (queue rules + burst machinery; runs on
+                    SQLite by default, TEST_DATABASE_URL=postgres re-runs it on PG)
 frontend/           React 18 + Vite + TypeScript SPA (TanStack Query, react-router)
-docker-compose.yml  production-style: uvicorn + nginx (static SPA + API/WS proxy)
+docker-compose.yml  postgres + redis + api ×N workers + bot service + nginx
 ```
 
 ## Quick start (development)
@@ -88,16 +130,23 @@ Tests:
 cd backend && pytest
 ```
 
-## Quick start (Docker)
+## Quick start (Docker, production-style)
 
 ```bash
 echo "SECRET_KEY=$(openssl rand -hex 32)" > .env
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
 docker compose up --build     # app on http://localhost:80
 ```
 
-SQLite data and uploaded logos live in named volumes. For PostgreSQL set
-`DATABASE_URL=postgresql+asyncpg://user:pass@host/db` for the backend and install the
-`postgres` extra in `backend/Dockerfile` (`pip install .[postgres]`).
+Starts PostgreSQL, Redis, the API (`API_WORKERS`, default 4), the bot
+service, and nginx. Postgres data, Redis AOF, and uploaded logos live in
+named volumes.
+
+**Telegram webhook mode (recommended for sale-day bursts):** put the stack
+behind HTTPS, set `BOT_WEBHOOK_BASE=https://your-domain/tgwh` in `.env` and
+restart the bot service. Each company bot is registered at
+`{base}/{company_id}` with a per-company HMAC secret; without a public URL
+the bot service falls back to long polling automatically.
 
 ## Using the system
 
@@ -130,8 +179,25 @@ SQLite data and uploaded logos live in named volumes. For PostgreSQL set
 
 ## Security notes
 
-- Passwords hashed with bcrypt; JWT (HS256) access tokens; role checks on every route.
+- Passwords hashed with bcrypt (off the event loop); JWT (HS256) access tokens; role checks
+  on every route.
 - Staff endpoints are scoped to the caller's company — cross-tenant access returns 404.
 - The public display exposes numbers only (no names/phones); ticket pages are addressable
   only by the unguessable QR code; display links use random codes.
-- Set a strong `SECRET_KEY` and serve over HTTPS in production (camera scanning requires it).
+- Telegram webhooks are validated with a per-company HMAC secret
+  (`X-Telegram-Bot-Api-Secret-Token`); nginx rate-limits the API (20 r/s per IP)
+  and auth endpoints (5 r/s per IP).
+- Set a strong `SECRET_KEY` and serve over HTTPS in production (camera scanning and
+  Telegram webhooks require it).
+
+## Scaling notes
+
+- `API_WORKERS` scales reads/staff actions; DB connections = workers × (pool + overflow) —
+  keep under Postgres `max_connections`.
+- The bot service stays a **single replica** (Telegram allows one consumer per token).
+  Inside it, updates are processed concurrently up to `BOT_MAX_CONCURRENT_UPDATES`.
+- The hard external limit is Telegram itself: ~30 outgoing messages/second per bot.
+  The system absorbs the incoming burst instantly (webhook ACK + queue in-process) and
+  the QR photos drain at Telegram's permitted rate.
+- Single-process dev mode (no `REDIS_URL`) keeps everything in one uvicorn process —
+  never run that with `--workers > 1`.

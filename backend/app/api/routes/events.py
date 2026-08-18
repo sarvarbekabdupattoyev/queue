@@ -106,7 +106,7 @@ async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent)
         event.is_active = payload.is_active
     await db.commit()
     await db.refresh(event)
-    await queue_service.broadcast_event(db, event)
+    queue_service.schedule_event_broadcast(event.id)
     return await _event_out(db, event)
 
 
@@ -173,5 +173,5 @@ async def seed_tickets(
         except Exception:
             continue
         made.append(ticket)
-    await queue_service.broadcast_event(db, event)
+    queue_service.schedule_event_broadcast(event.id)
     return [_ticket_out(t, {}) for t in made]

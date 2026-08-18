@@ -19,6 +19,7 @@ dependencies = [
     "qrcode[pil]>=8.0,<9",
     "aiogram>=3.17,<4",
     "python-multipart>=0.0.20",
+    "redis>=5.2,<6",
 ]
 
 [project.optional-dependencies]
@@ -36,5 +37,5 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "session"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]

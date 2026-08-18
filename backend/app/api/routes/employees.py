@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, OwnCompany, require_roles
-from app.core.security import generate_password, hash_password
+from app.core.security import generate_password, hash_password_async
 from app.models import User, UserRole
 from app.schemas.auth import UserOut
 from app.schemas.staff import EmployeeCreate, EmployeeUpdate, EmployeeWithPassword
@@ -51,7 +51,7 @@ async def create_employee(
     password = generate_password()
     employee = User(
         phone=payload.phone,
-        password_hash=hash_password(password),
+        password_hash=await hash_password_async(password),
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
         role=payload.role,
@@ -92,7 +92,7 @@ async def reset_password(
 ) -> EmployeeWithPassword:
     employee = await _get_employee(db, company.id, employee_id)
     password = generate_password()
-    employee.password_hash = hash_password(password)
+    employee.password_hash = await hash_password_async(password)
     await db.commit()
     return EmployeeWithPassword(employee=UserOut.model_validate(employee), password=password)
 

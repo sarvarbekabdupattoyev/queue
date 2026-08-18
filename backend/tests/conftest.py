@@ -6,9 +6,14 @@ from pathlib import Path
 # Telegram disabled and an isolated throw-away SQLite database.
 _TMP = Path(tempfile.mkdtemp(prefix="navbat-test-"))
 os.environ["TELEGRAM_ENABLED"] = "0"
-os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP / 'test.db'}"
+# Default: throw-away SQLite. Set TEST_DATABASE_URL to run the same suite
+# against PostgreSQL (e.g. postgresql+asyncpg://navbat@127.0.0.1:5544/navbat).
+os.environ["DATABASE_URL"] = os.environ.get(
+    "TEST_DATABASE_URL", f"sqlite+aiosqlite:///{_TMP / 'test.db'}"
+)
 os.environ["UPLOAD_DIR"] = str(_TMP / "uploads")
 os.environ["SECRET_KEY"] = "test-secret"
+os.environ["BROADCAST_DEBOUNCE_MS"] = "50"
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -16,6 +21,7 @@ from httpx import ASGITransport, AsyncClient
 from app.db.base import Base
 from app.db.session import engine
 from app.main import app
+from app.services import broadcast
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +30,14 @@ async def _fresh_db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
+    # cancel debounced broadcast tasks so they never leak into the next
+    # test's database (event ids repeat across fresh databases)
+    await broadcast.shutdown()
+    # pytest-asyncio gives every test its own event loop, but the global
+    # engine pool would happily hand a connection created on the previous
+    # loop to the next test — fatal with asyncpg. Drop pooled connections
+    # while their loop is still alive.
+    await engine.dispose()
 
 
 @pytest.fixture

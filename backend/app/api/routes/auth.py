@@ -2,7 +2,11 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    hash_password_async,
+    verify_password_async,
+)
 from app.models import User, UserRole
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
 
@@ -17,7 +21,7 @@ async def register(payload: RegisterRequest, db: DbSession) -> TokenResponse:
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam allaqachon ro'yxatdan o'tgan")
     user = User(
         phone=payload.phone,
-        password_hash=hash_password(payload.password),
+        password_hash=await hash_password_async(payload.password),
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
         role=UserRole.OWNER,
@@ -31,7 +35,7 @@ async def register(payload: RegisterRequest, db: DbSession) -> TokenResponse:
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
     user = await db.scalar(select(User).where(User.phone == payload.phone))
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None or not await verify_password_async(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Telefon raqam yoki parol noto'g'ri")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hisobingiz bloklangan — rahbaringizga murojaat qiling")

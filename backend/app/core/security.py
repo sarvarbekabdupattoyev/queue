@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 from datetime import timedelta
 
@@ -20,6 +21,16 @@ def verify_password(password: str, password_hash: str) -> bool:
         return bcrypt.checkpw(password.encode(), password_hash.encode())
     except ValueError:
         return False
+
+
+# bcrypt costs ~100–200 ms of CPU by design — never run it on the event loop.
+
+async def hash_password_async(password: str) -> str:
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, password_hash: str) -> bool:
+    return await asyncio.to_thread(verify_password, password, password_hash)
 
 
 def generate_password(length: int = 10) -> str:

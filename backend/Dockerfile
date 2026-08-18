@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[postgres]"
 
 RUN mkdir -p data uploads
 VOLUME ["/app/data", "/app/uploads"]

@@ -1,7 +1,11 @@
-"""Per-company Telegram bot conversation.
+"""Telegram bot conversation, shared by every company bot.
 
 /start → (choose event if several are open) → first name → last name → phone
 (contact button or typed) → ticket with a random 4-digit number + QR photo.
+
+Handlers are module-level functions; the owning company is injected by the
+dispatcher (``Dispatcher(company_id=...)`` workflow data), so N company bots
+share one code path, one FSM storage (keys are bot-scoped) and no closures.
 """
 
 import logging
@@ -30,7 +34,7 @@ from app.db.session import SessionFactory
 from app.models import SaleEvent, Ticket, TicketStatus
 from app.services import queue_service, ticket_service
 from app.services.errors import DomainError
-from app.services.qr_service import qr_png_bytes
+from app.services.qr_service import qr_png_bytes_async
 
 log = logging.getLogger(__name__)
 
@@ -95,7 +99,9 @@ async def _my_tickets(session: AsyncSession, company_id: int, chat_id: int) -> l
     return list((await session.scalars(stmt)).all())
 
 
-async def _send_ticket(message: Message, session: AsyncSession, ticket: Ticket, intro: str = "") -> None:
+async def _send_ticket(
+    message: Message, session: AsyncSession, ticket: Ticket, intro: str = ""
+) -> None:
     event = await session.get(SaleEvent, ticket.event_id)
     caption = (
         f"{intro}🎫 Navbat raqamingiz: №{ticket.number}\n"
@@ -107,14 +113,17 @@ async def _send_ticket(message: Message, session: AsyncSession, ticket: Ticket, 
         f"ro'yxatdan o'tgan vaqtingiz bo'yicha belgilanadi.\n\n"
         f"Holat: {STATUS_UZ[ticket.status]}"
     )
-    photo = BufferedInputFile(qr_png_bytes(ticket.code), filename=f"navbat-{ticket.number}.png")
+    # PIL work happens in a worker thread — a burst of registrations must not
+    # serialize on QR rendering in the event loop.
+    png = await qr_png_bytes_async(ticket.code)
+    photo = BufferedInputFile(png, filename=f"navbat-{ticket.number}.png")
     await message.answer_photo(photo=photo, caption=caption, reply_markup=MAIN_MENU)
 
 
 async def _status_text(session: AsyncSession, ticket: Ticket) -> str:
     event = await session.get(SaleEvent, ticket.event_id)
     active = await queue_service.active_tickets(session, event.id)
-    waiting = await queue_service.waiting_tickets(session, event.id)
+    waiting_total = await queue_service.waiting_count(session, event.id)
     desk_numbers = await queue_service.desk_numbers_for(session, active)
     if active:
         serving = ", ".join(
@@ -144,199 +153,208 @@ async def _status_text(session: AsyncSession, ticket: Ticket) -> str:
         )
     else:
         mine = f"Sizning raqamingiz: №{ticket.number}. Holat: {STATUS_UZ[ticket.status]}."
-    return f"📊 {now_line} Kutayotganlar: {len(waiting)} kishi.\n\n{mine}"
+    return f"📊 {now_line} Kutayotganlar: {waiting_total} kishi.\n\n{mine}"
 
 
-def build_router(company_id: int) -> Router:
-    router = Router(name=f"company-{company_id}")
+# ----------------------------------------------------------------- handlers ---
 
-    @router.message(CommandStart())
-    async def cmd_start(message: Message, state: FSMContext) -> None:
-        await state.clear()
-        async with SessionFactory() as session:
-            events = await _open_events(session, company_id)
-            tickets = await _my_tickets(session, company_id, message.chat.id)
-            ticket_event_ids = {t.event_id for t in tickets}
-            open_without_ticket = [e for e in events if e.id not in ticket_event_ids]
+async def cmd_start(message: Message, state: FSMContext, company_id: int) -> None:
+    await state.clear()
+    async with SessionFactory() as session:
+        events = await _open_events(session, company_id)
+        tickets = await _my_tickets(session, company_id, message.chat.id)
+        ticket_event_ids = {t.event_id for t in tickets}
+        open_without_ticket = [e for e in events if e.id not in ticket_event_ids]
 
-            if tickets and not open_without_ticket:
-                await message.answer("Siz allaqachon ro'yxatdan o'tgansiz. Mana navbatingiz:")
-                for ticket in tickets:
-                    await _send_ticket(message, session, ticket)
-                return
-            if not open_without_ticket:
-                await message.answer(
-                    "Hozircha ochiq tadbirlar yo'q. Tadbir e'lon qilinganda qayta urinib ko'ring.",
-                    reply_markup=MAIN_MENU,
-                )
-                return
-            if len(open_without_ticket) == 1:
-                event = open_without_ticket[0]
-                await state.set_state(Registration.first_name)
-                await state.update_data(event_id=event.id)
-                await message.answer(
-                    f"Assalomu alaykum! «{event.name}» uchun onlayn navbat botiga xush kelibsiz.\n\n"
-                    "Ro'yxatdan o'tish uchun 3 ta ma'lumot kerak: ism, familiya va telefon raqam. "
-                    "Bitta telefonga bitta navbat beriladi.\n\n1/3 — Ismingizni yozing:",
-                    reply_markup=ReplyKeyboardRemove(),
-                )
-                return
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=f"{e.name} — {queue_service.fmt_local(e.starts_at)}",
-                            callback_data=f"ev:{e.id}",
-                        )
-                    ]
-                    for e in open_without_ticket
-                ]
-            )
-            await state.set_state(Registration.choosing_event)
-            await message.answer(
-                "Assalomu alaykum! Qaysi tadbir uchun navbat olasiz?", reply_markup=keyboard
-            )
-
-    @router.callback_query(Registration.choosing_event, F.data.startswith("ev:"))
-    async def choose_event(callback: CallbackQuery, state: FSMContext) -> None:
-        event_id = int(callback.data.split(":", 1)[1])
-        async with SessionFactory() as session:
-            event = await session.get(SaleEvent, event_id)
-            if event is None or event.company_id != company_id or not event.registration_open():
-                await callback.answer("Bu tadbir uchun ro'yxat yopilgan", show_alert=True)
-                return
-        await callback.answer()
-        await state.set_state(Registration.first_name)
-        await state.update_data(event_id=event_id)
-        await callback.message.answer(
-            "1/3 — Ismingizni yozing:", reply_markup=ReplyKeyboardRemove()
-        )
-
-    @router.message(Command("navbat", "ticket"))
-    async def cmd_ticket(message: Message) -> None:
-        async with SessionFactory() as session:
-            tickets = await _my_tickets(session, company_id, message.chat.id)
-            if not tickets:
-                await message.answer("Siz hali ro'yxatdan o'tmagansiz. /start ni bosing.")
-                return
+        if tickets and not open_without_ticket:
+            await message.answer("Siz allaqachon ro'yxatdan o'tgansiz. Mana navbatingiz:")
             for ticket in tickets:
                 await _send_ticket(message, session, ticket)
-
-    @router.message(Command("holat", "status"))
-    async def cmd_status(message: Message) -> None:
-        await _answer_status(message)
-
-    @router.message(Command("help"))
-    async def cmd_help(message: Message) -> None:
-        await message.answer(
-            "/start — ro'yxatdan o'tish\n/navbat — mening navbatim (QR-kod)\n/holat — navbat holati"
-        )
-
-    @router.message(Registration.first_name, F.text)
-    async def reg_first_name(message: Message, state: FSMContext) -> None:
-        text = message.text.strip()
-        if not NAME_RE.fullmatch(text):
-            await message.answer("Iltimos, faqat harflardan iborat ism yozing (2–30 belgi).")
             return
-        await state.update_data(first_name=_cap(text))
-        await state.set_state(Registration.last_name)
-        await message.answer("2/3 — Familiyangizni yozing:")
-
-    @router.message(Registration.last_name, F.text)
-    async def reg_last_name(message: Message, state: FSMContext) -> None:
-        text = message.text.strip()
-        if not NAME_RE.fullmatch(text):
-            await message.answer("Iltimos, faqat harflardan iborat familiya yozing (2–30 belgi).")
-            return
-        await state.update_data(last_name=_cap(text))
-        await state.set_state(Registration.phone)
-        await message.answer(
-            "3/3 — Telefon raqamingizni yuboring. Pastdagi «📱 Raqamni yuborish» tugmasini "
-            "bosing yoki raqamni yozing (masalan, +998 90 123 45 67).",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
-                resize_keyboard=True,
-                one_time_keyboard=True,
-            ),
-        )
-
-    @router.message(Registration.phone, F.contact)
-    async def reg_phone_contact(message: Message, state: FSMContext) -> None:
-        await _finish_registration(message, state, message.contact.phone_number)
-
-    @router.message(Registration.phone, F.text)
-    async def reg_phone_text(message: Message, state: FSMContext) -> None:
-        await _finish_registration(message, state, message.text)
-
-    @router.message(F.text == BTN_MY_TICKET)
-    async def menu_ticket(message: Message) -> None:
-        await cmd_ticket(message)
-
-    @router.message(F.text == BTN_STATUS)
-    async def menu_status(message: Message) -> None:
-        await _answer_status(message)
-
-    @router.message(F.text)
-    async def fallback(message: Message, state: FSMContext) -> None:
-        if await state.get_state() is None:
+        if not open_without_ticket:
             await message.answer(
-                "Ro'yxatdan o'tish uchun /start ni bosing.", reply_markup=MAIN_MENU
+                "Hozircha ochiq tadbirlar yo'q. Tadbir e'lon qilinganda qayta urinib ko'ring.",
+                reply_markup=MAIN_MENU,
             )
-
-    async def _answer_status(message: Message) -> None:
-        async with SessionFactory() as session:
-            tickets = await _my_tickets(session, company_id, message.chat.id)
-            if not tickets:
-                await message.answer("Siz hali ro'yxatdan o'tmagansiz. /start ni bosing.")
-                return
-            for ticket in tickets:
-                await message.answer(await _status_text(session, ticket), reply_markup=MAIN_MENU)
-
-    async def _finish_registration(message: Message, state: FSMContext, raw_phone: str) -> None:
-        phone = normalize_phone(raw_phone)
-        if phone is None:
-            await message.answer("Raqam noto'g'ri. O'zbekiston raqamini kiriting: +998 XX XXX XX XX")
             return
-        data = await state.get_data()
-        async with SessionFactory() as session:
-            event = await session.get(SaleEvent, data["event_id"])
-            if event is None or not event.registration_open():
-                await state.clear()
-                await message.answer(
-                    "Afsuski, bu tadbir uchun ro'yxat yopildi.", reply_markup=MAIN_MENU
-                )
-                return
-            existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
-            if existing is not None:
-                await state.clear()
-                if existing.telegram_chat_id is None:
-                    existing.telegram_chat_id = message.chat.id
-                    await session.commit()
-                await message.answer(
-                    "Bu telefon raqamiga navbat allaqachon berilgan. Mana u:",
-                    reply_markup=MAIN_MENU,
-                )
-                await _send_ticket(message, session, existing)
-                return
-            try:
-                ticket = await ticket_service.create_ticket(
-                    session,
-                    event,
-                    first_name=data["first_name"],
-                    last_name=data["last_name"],
-                    phone=phone,
-                    telegram_chat_id=message.chat.id,
-                )
-            except DomainError as exc:
-                await state.clear()
-                await message.answer(exc.message, reply_markup=MAIN_MENU)
-                return
-            await state.clear()
-            await queue_service.broadcast_event(session, event)
-            await message.answer("✅ Ro'yxatdan o'tdingiz!", reply_markup=MAIN_MENU)
-            await _send_ticket(message, session, ticket)
-            log.info(
-                "New ticket #%s (%s) for event %s via bot", ticket.number, phone, event.id
+        if len(open_without_ticket) == 1:
+            event = open_without_ticket[0]
+            await state.set_state(Registration.first_name)
+            await state.update_data(event_id=event.id)
+            await message.answer(
+                f"Assalomu alaykum! «{event.name}» uchun onlayn navbat botiga xush kelibsiz.\n\n"
+                "Ro'yxatdan o'tish uchun 3 ta ma'lumot kerak: ism, familiya va telefon raqam. "
+                "Bitta telefonga bitta navbat beriladi.\n\n1/3 — Ismingizni yozing:",
+                reply_markup=ReplyKeyboardRemove(),
             )
+            return
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=f"{e.name} — {queue_service.fmt_local(e.starts_at)}",
+                        callback_data=f"ev:{e.id}",
+                    )
+                ]
+                for e in open_without_ticket
+            ]
+        )
+        await state.set_state(Registration.choosing_event)
+        await message.answer(
+            "Assalomu alaykum! Qaysi tadbir uchun navbat olasiz?", reply_markup=keyboard
+        )
 
+
+async def choose_event(callback: CallbackQuery, state: FSMContext, company_id: int) -> None:
+    event_id = int(callback.data.split(":", 1)[1])
+    async with SessionFactory() as session:
+        event = await session.get(SaleEvent, event_id)
+        if event is None or event.company_id != company_id or not event.registration_open():
+            await callback.answer("Bu tadbir uchun ro'yxat yopilgan", show_alert=True)
+            return
+    await callback.answer()
+    await state.set_state(Registration.first_name)
+    await state.update_data(event_id=event_id)
+    await callback.message.answer("1/3 — Ismingizni yozing:", reply_markup=ReplyKeyboardRemove())
+
+
+async def cmd_ticket(message: Message, company_id: int) -> None:
+    async with SessionFactory() as session:
+        tickets = await _my_tickets(session, company_id, message.chat.id)
+        if not tickets:
+            await message.answer("Siz hali ro'yxatdan o'tmagansiz. /start ni bosing.")
+            return
+        for ticket in tickets:
+            await _send_ticket(message, session, ticket)
+
+
+async def cmd_status(message: Message, company_id: int) -> None:
+    async with SessionFactory() as session:
+        tickets = await _my_tickets(session, company_id, message.chat.id)
+        if not tickets:
+            await message.answer("Siz hali ro'yxatdan o'tmagansiz. /start ni bosing.")
+            return
+        for ticket in tickets:
+            await message.answer(await _status_text(session, ticket), reply_markup=MAIN_MENU)
+
+
+async def cmd_help(message: Message) -> None:
+    await message.answer(
+        "/start — ro'yxatdan o'tish\n/navbat — mening navbatim (QR-kod)\n/holat — navbat holati"
+    )
+
+
+async def reg_first_name(message: Message, state: FSMContext) -> None:
+    text = message.text.strip()
+    if not NAME_RE.fullmatch(text):
+        await message.answer("Iltimos, faqat harflardan iborat ism yozing (2–30 belgi).")
+        return
+    await state.update_data(first_name=_cap(text))
+    await state.set_state(Registration.last_name)
+    await message.answer("2/3 — Familiyangizni yozing:")
+
+
+async def reg_last_name(message: Message, state: FSMContext) -> None:
+    text = message.text.strip()
+    if not NAME_RE.fullmatch(text):
+        await message.answer("Iltimos, faqat harflardan iborat familiya yozing (2–30 belgi).")
+        return
+    await state.update_data(last_name=_cap(text))
+    await state.set_state(Registration.phone)
+    await message.answer(
+        "3/3 — Telefon raqamingizni yuboring. Pastdagi «📱 Raqamni yuborish» tugmasini "
+        "bosing yoki raqamni yozing (masalan, +998 90 123 45 67).",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
+
+
+async def reg_phone_contact(message: Message, state: FSMContext) -> None:
+    await _finish_registration(message, state, message.contact.phone_number)
+
+
+async def reg_phone_text(message: Message, state: FSMContext) -> None:
+    await _finish_registration(message, state, message.text)
+
+
+async def menu_ticket(message: Message, company_id: int) -> None:
+    await cmd_ticket(message, company_id)
+
+
+async def menu_status(message: Message, company_id: int) -> None:
+    await cmd_status(message, company_id)
+
+
+async def fallback(message: Message, state: FSMContext) -> None:
+    if await state.get_state() is None:
+        await message.answer("Ro'yxatdan o'tish uchun /start ni bosing.", reply_markup=MAIN_MENU)
+
+
+async def _finish_registration(message: Message, state: FSMContext, raw_phone: str) -> None:
+    phone = normalize_phone(raw_phone)
+    if phone is None:
+        await message.answer("Raqam noto'g'ri. O'zbekiston raqamini kiriting: +998 XX XXX XX XX")
+        return
+    data = await state.get_data()
+    async with SessionFactory() as session:
+        event = await session.get(SaleEvent, data["event_id"])
+        if event is None or not event.registration_open():
+            await state.clear()
+            await message.answer(
+                "Afsuski, bu tadbir uchun ro'yxat yopildi.", reply_markup=MAIN_MENU
+            )
+            return
+        existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
+        if existing is not None:
+            await state.clear()
+            if existing.telegram_chat_id is None:
+                existing.telegram_chat_id = message.chat.id
+                await session.commit()
+            await message.answer(
+                "Bu telefon raqamiga navbat allaqachon berilgan. Mana u:",
+                reply_markup=MAIN_MENU,
+            )
+            await _send_ticket(message, session, existing)
+            return
+        try:
+            ticket = await ticket_service.create_ticket(
+                session,
+                event,
+                first_name=data["first_name"],
+                last_name=data["last_name"],
+                phone=phone,
+                telegram_chat_id=message.chat.id,
+            )
+        except DomainError as exc:
+            await state.clear()
+            await message.answer(exc.message, reply_markup=MAIN_MENU)
+            return
+        await state.clear()
+        queue_service.schedule_event_broadcast(event.id)
+        await message.answer("✅ Ro'yxatdan o'tdingiz!", reply_markup=MAIN_MENU)
+        await _send_ticket(message, session, ticket)
+        log.info("New ticket #%s (%s) for event %s via bot", ticket.number, phone, event.id)
+
+
+def build_router() -> Router:
+    """Fresh Router wired to the shared handlers (a Router instance cannot be
+    attached to more than one Dispatcher)."""
+    router = Router()
+    router.message.register(cmd_start, CommandStart())
+    router.message.register(cmd_ticket, Command("navbat", "ticket"))
+    router.message.register(cmd_status, Command("holat", "status"))
+    router.message.register(cmd_help, Command("help"))
+    router.callback_query.register(
+        choose_event, Registration.choosing_event, F.data.startswith("ev:")
+    )
+    router.message.register(reg_first_name, Registration.first_name, F.text)
+    router.message.register(reg_last_name, Registration.last_name, F.text)
+    router.message.register(reg_phone_contact, Registration.phone, F.contact)
+    router.message.register(reg_phone_text, Registration.phone, F.text)
+    router.message.register(menu_ticket, F.text == BTN_MY_TICKET)
+    router.message.register(menu_status, F.text == BTN_STATUS)
+    router.message.register(fallback, F.text)
     return router

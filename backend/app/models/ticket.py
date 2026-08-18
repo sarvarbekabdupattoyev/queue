@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -25,6 +26,9 @@ class Ticket(Base):
     __table_args__ = (
         UniqueConstraint("event_id", "number", name="uq_ticket_event_number"),
         UniqueConstraint("event_id", "phone", name="uq_ticket_event_phone"),
+        # hot paths: waiting-list ordering and per-chat lookups
+        Index("ix_ticket_event_status", "event_id", "status"),
+        Index("ix_ticket_event_chat", "event_id", "telegram_chat_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -1,13 +1,68 @@
+x-backend-env: &backend-env
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+  DATABASE_URL: postgresql+asyncpg://navbat:${POSTGRES_PASSWORD:-navbat}@postgres:5432/navbat
+  REDIS_URL: redis://redis:6379/0
+  TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-1}
+  CALL_TIMEOUT_MINUTES: ${CALL_TIMEOUT_MINUTES:-3}
+  # Set to your public HTTPS base for webhook mode (recommended for bursts),
+  # e.g. https://example.com/tgwh — leave empty for long polling.
+  BOT_WEBHOOK_BASE: ${BOT_WEBHOOK_BASE:-}
+  BOT_MAX_CONCURRENT_UPDATES: ${BOT_MAX_CONCURRENT_UPDATES:-64}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+
 services:
-  backend:
-    build: ./backend
+  postgres:
+    image: postgres:16-alpine
     environment:
-      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
-      - TELEGRAM_ENABLED=${TELEGRAM_ENABLED:-1}
-      - CALL_TIMEOUT_MINUTES=${CALL_TIMEOUT_MINUTES:-3}
+      POSTGRES_USER: navbat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-navbat}
+      POSTGRES_DB: navbat
     volumes:
-      - navbat-data:/app/data
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U navbat -d navbat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-4}
+    environment: *backend-env
+    volumes:
       - navbat-uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The only process that talks to Telegram (webhook receiver / poller,
+  # notification sender). Exactly one replica per deployment.
+  bot:
+    build: ./backend
+    command: uvicorn app.bot_main:app --host 0.0.0.0 --port 8081
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -15,9 +70,11 @@ services:
     ports:
       - "${HTTP_PORT:-80}:80"
     depends_on:
-      - backend
+      - api
+      - bot
     restart: unless-stopped
 
 volumes:
-  navbat-data:
+  pg-data:
+  redis-data:
   navbat-uploads:

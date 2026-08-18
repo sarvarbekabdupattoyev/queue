@@ -1,6 +1,6 @@
 import secrets
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,21 +61,21 @@ async def create_ticket(
 ) -> Ticket:
     if not event.registration_open():
         raise DomainError("Bu tadbir uchun ro'yxatdan o'tish yopilgan")
+    # A rollback below expires `event`'s loaded attributes; touching event.id
+    # afterwards would lazy-load synchronously and crash under asyncpg, so
+    # capture it up front and never dereference the ORM object again.
+    event_id = event.id
 
-    existing = await get_ticket_by_phone(db, event.id, phone)
+    existing = await get_ticket_by_phone(db, event_id, phone)
     if existing is not None:
         raise ConflictError("Bu telefon raqamiga navbat allaqachon berilgan")
 
-    count = await db.scalar(
-        select(func.count()).select_from(Ticket).where(Ticket.event_id == event.id)
-    )
-    if count >= CAPACITY:
-        raise DomainError("Tadbirda bo'sh raqam qolmadi (9000 ta chegara)")
-
+    # No COUNT pre-check per registration: capacity exhaustion is detected by
+    # _pick_free_number's fallback scan, keeping the hot path at 2 SELECTs.
     for _ in range(5):
-        number = await _pick_free_number(db, event.id)
+        number = await _pick_free_number(db, event_id)
         ticket = Ticket(
-            event_id=event.id,
+            event_id=event_id,
             number=number,
             code=make_code(number),
             first_name=first_name,
@@ -90,9 +90,12 @@ async def create_ticket(
         except IntegrityError:
             # lost a race for the number (or phone registered concurrently)
             await db.rollback()
-            if await get_ticket_by_phone(db, event.id, phone):
+            # the rollback expired `event`'s attributes — re-hydrate the same
+            # identity-mapped instance so callers can keep using their reference
+            await db.get(SaleEvent, event_id)
+            if await get_ticket_by_phone(db, event_id, phone):
                 raise ConflictError("Bu telefon raqamiga navbat allaqachon berilgan") from None
             continue
-        await db.refresh(ticket)
+        # expire_on_commit=False keeps attributes loaded — no refresh needed
         return ticket
     raise DomainError("Raqam berishda xatolik — qayta urinib ko'ring")
