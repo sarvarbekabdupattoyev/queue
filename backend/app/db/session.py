@@ -44,6 +44,7 @@ async def create_schema() -> None:
     this races, so it is serialized with an advisory lock. (For evolving
     production schemas, switch to Alembic migrations.)"""
     from app.db.base import Base
+    import app.models  # noqa: F401 — register every model on Base.metadata
 
     async with engine.begin() as conn:
         if engine.dialect.name == "postgresql":
