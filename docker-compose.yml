@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
+      - TELEGRAM_ENABLED=${TELEGRAM_ENABLED:-1}
+      - CALL_TIMEOUT_MINUTES=${CALL_TIMEOUT_MINUTES:-3}
+    volumes:
+      - navbat-data:/app/data
+      - navbat-uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  navbat-data:
+  navbat-uploads:
