@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, UTCDateTime, now_utc
@@ -9,9 +9,24 @@ from app.models.enums import UserRole
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # A phone is unique inside one company only: two different companies
+        # may each employ (or be owned by) the same phone number.
+        UniqueConstraint("company_id", "phone", name="uq_user_company_phone"),
+        # Owners sign up before they have a company (company_id is NULL, which
+        # the composite constraint cannot police), so owner accounts get their
+        # own phone uniqueness via a partial index.
+        Index(
+            "uq_users_owner_phone",
+            "phone",
+            unique=True,
+            sqlite_where=text("role = 'OWNER'"),
+            postgresql_where=text("role = 'OWNER'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    phone: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    phone: Mapped[str] = mapped_column(String(16), index=True)
     password_hash: Mapped[str] = mapped_column(String(128))
     first_name: Mapped[str] = mapped_column(String(64))
     last_name: Mapped[str] = mapped_column(String(64), default="")

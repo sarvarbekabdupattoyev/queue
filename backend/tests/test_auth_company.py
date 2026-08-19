@@ -149,6 +149,58 @@ async def test_employee_lifecycle_and_roles(client):
     assert blocked.status_code == 403
 
 
+async def test_same_employee_phone_allowed_across_companies(client):
+    """A phone is unique inside ONE company: two different clients (companies)
+    may each add the same person as their manager."""
+    token1 = (await register_owner(client))["access_token"]
+    company1 = await create_company(client, token1)
+    token2 = (await register_owner(client, phone="+998907777777"))["access_token"]
+    company2 = await create_company(client, token2, name="Boshqa Kompaniya")
+
+    manager = {"first_name": "Malika", "last_name": "Yusupova", "phone": "+998909998877", "role": "manager"}
+    first = await client.post("/api/employees", json=manager, headers=auth(token1))
+    assert first.status_code == 201, first.text
+
+    # the same phone in ANOTHER company must be accepted
+    second = await client.post("/api/employees", json=manager, headers=auth(token2))
+    assert second.status_code == 201, second.text
+
+    # ...but stays unique inside one company
+    duplicate = await client.post("/api/employees", json=manager, headers=auth(token2))
+    assert duplicate.status_code == 409
+
+    # each account logs in with its own password and lands in its own company
+    for response, company in ((first, company1), (second, company2)):
+        login = await client.post(
+            "/api/auth/login",
+            json={"phone": "+998909998877", "password": response.json()["password"]},
+        )
+        assert login.status_code == 200, login.text
+        assert login.json()["user"]["company_id"] == company["id"]
+
+
+async def test_owner_can_register_with_phone_employed_elsewhere(client):
+    token = (await register_owner(client))["access_token"]
+    await create_company(client, token)
+    employee = await client.post(
+        "/api/employees",
+        json={"first_name": "Malika", "phone": "+998909998877", "role": "manager"},
+        headers=auth(token),
+    )
+    assert employee.status_code == 201
+
+    # being someone's manager must not block signing up as a new client
+    signup = await register_owner(client, phone="+998909998877")
+    assert signup["user"]["role"] == "owner"
+
+    # duplicate owner accounts are still rejected
+    again = await client.post(
+        "/api/auth/register",
+        json={"first_name": "Aziz", "phone": "+998909998877", "password": "secret123"},
+    )
+    assert again.status_code == 409
+
+
 async def test_desks(client):
     token = (await register_owner(client))["access_token"]
     await create_company(client, token)

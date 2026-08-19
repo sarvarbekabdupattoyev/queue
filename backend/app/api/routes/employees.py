@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession, OwnCompany, require_roles
 from app.core.security import generate_password, hash_password_async
@@ -53,9 +54,16 @@ async def create_employee(
         )
     if payload.branch_id is not None:
         await _validate_branch(db, company.id, payload.branch_id)
-    existing = await db.scalar(select(User.id).where(User.phone == payload.phone))
+    # a phone is unique inside THIS company only — another company employing
+    # the same person (same phone) must not block hiring them here
+    company_id = company.id
+    existing = await db.scalar(
+        select(User.id).where(User.phone == payload.phone, User.company_id == company_id)
+    )
     if existing is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam allaqachon ro'yxatdan o'tgan")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Bu raqam kompaniyangizda allaqachon ro'yxatdan o'tgan"
+        )
     password = generate_password()
     employee = User(
         phone=payload.phone,
@@ -63,11 +71,18 @@ async def create_employee(
         first_name=payload.first_name.strip(),
         last_name=payload.last_name.strip(),
         role=payload.role,
-        company_id=company.id,
+        company_id=company_id,
         branch_id=payload.branch_id,
     )
     db.add(employee)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # lost a race adding the same phone to this company twice
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Bu raqam kompaniyangizda allaqachon ro'yxatdan o'tgan"
+        ) from None
     await db.refresh(employee)
     # The plain password is returned exactly once; only the hash is stored.
     return EmployeeWithPassword(employee=UserOut.model_validate(employee), password=password)

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.security import (
@@ -15,8 +16,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, db: DbSession) -> TokenResponse:
-    """Sign up a client (company owner). Employees are created by their owner."""
-    existing = await db.scalar(select(User.id).where(User.phone == payload.phone))
+    """Sign up a client (company owner). Employees are created by their owner.
+
+    Owner phones are unique among owners only: the same phone may already be
+    an employee of some other company — that must not block a new sign-up.
+    """
+    existing = await db.scalar(
+        select(User.id).where(User.phone == payload.phone, User.role == UserRole.OWNER)
+    )
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam allaqachon ro'yxatdan o'tgan")
     user = User(
@@ -27,15 +34,36 @@ async def register(payload: RegisterRequest, db: DbSession) -> TokenResponse:
         role=UserRole.OWNER,
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # lost a race with a concurrent sign-up of the same phone
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Bu raqam allaqachon ro'yxatdan o'tgan"
+        ) from None
     await db.refresh(user)
     return TokenResponse(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
-    user = await db.scalar(select(User).where(User.phone == payload.phone))
-    if user is None or not await verify_password_async(payload.password, user.password_hash):
+    # One phone may hold accounts in several companies (e.g. a manager hired
+    # by two clients) — the password picks the account. Active accounts are
+    # tried first so a deactivated duplicate cannot shadow a working one.
+    candidates = (
+        await db.scalars(
+            select(User)
+            .where(User.phone == payload.phone)
+            .order_by(User.is_active.desc(), User.id)
+        )
+    ).all()
+    user = None
+    for candidate in candidates:
+        if await verify_password_async(payload.password, candidate.password_hash):
+            user = candidate
+            break
+    if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Telefon raqam yoki parol noto'g'ri")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Hisobingiz bloklangan — rahbaringizga murojaat qiling")
