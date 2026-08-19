@@ -218,19 +218,25 @@ _T: dict[str, dict[str, str]] = {
         "en": "Press /start to register.",
     },
     # ------------------------------------------------------------- ticket ---
+    # the code stands alone on an emphasized line (and is also drawn in large
+    # type inside the QR photo itself); reg_time carries milliseconds because
+    # the registration moment IS the queue order
     "ticket_caption": {
-        "uz": "{intro}🎫 Navbat kodingiz: №{number}\n🗓 {event} — {starts}\n{branch_line}"
-              "👤 {name}\n📞 {phone}\n\n"
+        "uz": "{intro}🎫 Navbat kodingiz:\n\n▶️ №{number} ◀️\n\n🗓 {event} — {starts}\n{branch_line}"
+              "👤 {name}\n📞 {phone}\n"
+              "🕐 Ro'yxatdan o'tgan vaqtingiz: {reg_time}\n\n"
               "Ofisga kelganda shu QR-kodni qabulxonada ko'rsating — kelganingiz qayd etiladi. "
               "Skanerlash {deadline} gacha. Navbat tartibi ro'yxatdan o'tgan vaqtingiz "
               "bo'yicha belgilanadi.\n\nHolat: {status}",
-        "ru": "{intro}🎫 Ваш код очереди: №{number}\n🗓 {event} — {starts}\n{branch_line}"
-              "👤 {name}\n📞 {phone}\n\n"
+        "ru": "{intro}🎫 Ваш код очереди:\n\n▶️ №{number} ◀️\n\n🗓 {event} — {starts}\n{branch_line}"
+              "👤 {name}\n📞 {phone}\n"
+              "🕐 Время вашей регистрации: {reg_time}\n\n"
               "Придя в офис, покажите этот QR-код на ресепшене — вашу явку отметят. "
               "Сканирование до {deadline}. Порядок очереди определяется временем "
               "вашей регистрации.\n\nСтатус: {status}",
-        "en": "{intro}🎫 Your queue code: №{number}\n🗓 {event} — {starts}\n{branch_line}"
-              "👤 {name}\n📞 {phone}\n\n"
+        "en": "{intro}🎫 Your queue code:\n\n▶️ №{number} ◀️\n\n🗓 {event} — {starts}\n{branch_line}"
+              "👤 {name}\n📞 {phone}\n"
+              "🕐 Your registration time: {reg_time}\n\n"
               "When you arrive, show this QR code at the reception desk to check in. "
               "Scanning is open until {deadline}. The queue order is based on your "
               "registration time.\n\nStatus: {status}",

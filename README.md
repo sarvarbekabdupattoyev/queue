@@ -174,6 +174,24 @@ restart the bot service. Each company bot is registered at
 `{base}/{bot_id}` with a per-bot HMAC secret; without a public URL
 the bot service falls back to long polling automatically.
 
+## Production deployment (dedicated server)
+
+The repo ships a complete production package for a single Ubuntu 24.04 node:
+`docker-compose.prod.yml` (resource limits, tuned PostgreSQL/Redis,
+healthchecks), `deploy/nginx/prod.conf` (TLS, rate limits, webhook path,
+1-second public micro-cache), `deploy/setup-server.sh` (OS bootstrap:
+kernel, firewall, Docker, swap, backups cron) and `.env.example`.
+
+```bash
+sudo bash deploy/setup-server.sh
+sudo certbot certonly --standalone -d smartnavbat.uz -d www.smartnavbat.uz
+cp .env.example .env   # fill in SECRET_KEY, POSTGRES_PASSWORD
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+The full walkthrough — capacity model, tuning rationale, load-test script and
+sale-day runbook — is in [`docs/PRODUCTION_SERVER_SETUP.md`](docs/PRODUCTION_SERVER_SETUP.md).
+
 ## Using the system
 
 Follow the order — the dashboard checklist walks through the same steps:
@@ -213,6 +231,7 @@ Follow the order — the dashboard checklist walks through the same steps:
 | POST | `/api/queue/{event}/walkin` | owner/scanner | add a walk-in client to the end of the queue (returns QR) |
 | POST | `/api/queue/{event}/call` · `recall` · `serving` · `skip` · `done` · `cancel` | manager/owner | desk actions |
 | GET | `/api/public/display/{code}` · `/api/public/tickets/{code}` | public | TV board, client ticket |
+| GET | `/api/health` | public | liveness: DB `SELECT 1` + Redis `PING`, 200/503 (bot service: `/healthz`) |
 | WS | `/api/ws/display/{code}` · `/api/ws/staff/{event}?token=` | public / staff | live state push |
 
 ## Security notes

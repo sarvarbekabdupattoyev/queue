@@ -17,6 +17,7 @@ import logging
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.redis import close_redis
@@ -88,5 +89,34 @@ async def telegram_webhook(
 
 
 @app.get("/healthz")
-async def healthz() -> dict:
-    return {"status": "ok", "bots": len(bot_manager._runners)}
+async def healthz() -> JSONResponse:
+    """Container healthcheck: the service is healthy only while its database
+    and Redis (both required in bot-service mode) answer."""
+    from sqlalchemy import text
+
+    from app.core.redis import get_redis
+    from app.db.session import SessionFactory
+
+    checks: dict[str, object] = {"bots": len(bot_manager._runners)}
+    healthy = True
+    try:
+        async with SessionFactory() as db:
+            await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        log.exception("Health check: database unreachable")
+        checks["database"] = "down"
+        healthy = False
+    redis = get_redis()
+    if redis is not None:
+        try:
+            await redis.ping()
+            checks["redis"] = "ok"
+        except Exception:
+            log.exception("Health check: redis unreachable")
+            checks["redis"] = "down"
+            healthy = False
+    return JSONResponse(
+        status_code=200 if healthy else 503,
+        content={"status": "ok" if healthy else "degraded", **checks},
+    )

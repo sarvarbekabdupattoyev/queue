@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # Max updates processed concurrently by the bot service (protects the
     # DB pool during registration bursts).
     bot_max_concurrent_updates: int = 64
+    # Parallel connections Telegram may use to deliver webhook updates
+    # (Telegram default is 40; 100 is the maximum and drains bursts faster).
+    bot_webhook_max_connections: int = 100
 
     # Full event state is rebuilt and pushed to screens at most once per
     # window, however many mutations land inside it.

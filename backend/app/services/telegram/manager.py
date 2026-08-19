@@ -37,6 +37,7 @@ from app.core.config import get_settings
 from app.core.redis import CH_BOT_CONTROL, CH_NOTIFY, get_redis
 from app.services import i18n
 from app.services.errors import DomainError
+from app.services.telegram.throttle import RateLimitMiddleware
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +83,9 @@ class CompanyBotRunner:
         self.company_id = company_id
         self.token = token
         self.bot = Bot(token=token)
+        # single choke point for EVERYTHING this bot sends: paces sends under
+        # Telegram's per-token cap and retries on flood control (429)
+        self.bot.session.middleware(RateLimitMiddleware())
         # company_id + bot_db_id land in workflow data, injected into handlers
         self.dp = Dispatcher(storage=storage, company_id=company_id, bot_db_id=bot_db_id)
         self.username: str | None = None
@@ -108,6 +112,9 @@ class CompanyBotRunner:
                 secret_token=webhook_secret(self.bot_db_id),
                 allowed_updates=self.dp.resolve_used_update_types(),
                 drop_pending_updates=False,
+                # default is 40 — 100 parallel connections lets Telegram
+                # deliver a registration burst noticeably faster, for free
+                max_connections=settings.bot_webhook_max_connections,
             )
             log.info("Bot @%s (company %s): webhook %s", me.username, self.company_id, url)
         else:

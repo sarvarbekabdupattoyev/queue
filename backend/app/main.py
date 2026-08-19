@@ -162,8 +162,38 @@ def create_app() -> FastAPI:
     app.mount("/media", StaticFiles(directory=settings.upload_dir), name="media")
 
     @app.get("/api/health")
-    async def health() -> dict:
-        return {"status": "ok"}
+    async def health() -> JSONResponse:
+        """Liveness for load balancers / container healthchecks: proves the
+        database answers and (when configured) Redis does too. Public and
+        unauthenticated by design — it leaks nothing beyond up/down."""
+        from sqlalchemy import text
+
+        from app.core.redis import get_redis
+        from app.db.session import SessionFactory
+
+        checks: dict[str, str] = {}
+        healthy = True
+        try:
+            async with SessionFactory() as db:
+                await db.execute(text("SELECT 1"))
+            checks["database"] = "ok"
+        except Exception:
+            log.exception("Health check: database unreachable")
+            checks["database"] = "down"
+            healthy = False
+        redis = get_redis()
+        if redis is not None:
+            try:
+                await redis.ping()
+                checks["redis"] = "ok"
+            except Exception:
+                log.exception("Health check: redis unreachable")
+                checks["redis"] = "down"
+                healthy = False
+        return JSONResponse(
+            status_code=200 if healthy else 503,
+            content={"status": "ok" if healthy else "degraded", **checks},
+        )
 
     return app
 

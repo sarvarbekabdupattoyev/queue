@@ -51,11 +51,14 @@ def test_i18n_falls_back_to_uzbek():
         text = t(
             lang,
             "ticket_caption",
-            intro="", number=1234, event="Sotuv", starts="09:00 (01.09.2026)",
+            intro="", number="KJZR", event="Sotuv", starts="09:00 (01.09.2026)",
             branch_line="", name="Test Testov", phone="+998 90 123 45 67",
+            reg_time="08:12:31.204 (01.09.2026)",
             deadline="10:00 (01.09.2026)", status="ok",
         )
-        assert "1234" in text
+        assert "KJZR" in text
+        # the registration moment (with milliseconds) is part of the ticket
+        assert "08:12:31.204" in text
         assert t(lang, "ntf_called", number=1, desk=2, minutes=3)
 
 
