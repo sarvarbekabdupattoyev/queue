@@ -9,7 +9,7 @@ export type TicketStatus =
   | 'skipped'
   | 'cancelled'
 
-export type EventPhase = 'closed' | 'registration' | 'checkin' | 'queue'
+export type EventPhase = 'closed' | 'registration' | 'checkin' | 'queue' | 'hold' | 'ended'
 
 export interface User {
   id: number
@@ -88,8 +88,12 @@ export interface EventBranch {
 export interface SaleEvent {
   id: number
   name: string
+  registration_until: string
   starts_at: string
   checkin_until: string
+  sale_starts_at: string
+  sale_hold: boolean
+  sale_ended_at: string | null
   is_active: boolean
   display_code: string
   phase: EventPhase
@@ -107,7 +111,7 @@ export interface Ticket {
   phone: string
   status: TicketStatus
   late: boolean
-  source: 'bot' | 'seed'
+  source: 'bot' | 'staff' | 'seed'
   branch_id: number | null
   branch_name: string | null
   registered_at: string
@@ -142,6 +146,10 @@ export interface QueueStats {
   waiting: number
   done: number
   skipped: number
+  /** clients who joined the end-of-day (last) queue */
+  late: number
+  /** walk-ins added at the door by the owner/scanner */
+  staff_added: number
 }
 
 /** One waiting ticket as the public TV board shows it: the 4-letter code,
@@ -166,8 +174,12 @@ export interface PublicState {
     id: number
     name: string
     phase: EventPhase
+    registration_until: string
     starts_at: string
     checkin_until: string
+    sale_starts_at: string
+    sale_hold: boolean
+    sale_ended_at: string | null
     company_name: string
     logo_url: string | null
     branches: EventBranch[]
@@ -203,6 +215,14 @@ export interface ActionResponse {
   ok: boolean
   message: string
   ticket: Ticket | null
+}
+
+export interface WalkinResponse {
+  ok: boolean
+  message: string
+  ticket: Ticket
+  /** the new client's QR as a data URL — shown once after adding */
+  qr: string
 }
 
 export interface StatsDaily {

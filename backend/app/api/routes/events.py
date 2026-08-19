@@ -11,13 +11,17 @@ from app.models import (
     TicketStatus,
     UserRole,
 )
+from app.db.base import now_utc
 from app.schemas.event import (
+    PERIOD_ORDER_ERROR,
     EventBranchOut,
     EventCreate,
     EventOut,
     EventUpdate,
+    SaleActionRequest,
     SeedRequest,
     TicketOut,
+    check_period_order,
 )
 from app.services import queue_service, ticket_service
 
@@ -51,8 +55,12 @@ async def _event_out(db: DbSession, event: SaleEvent) -> EventOut:
     return EventOut(
         id=event.id,
         name=event.name,
+        registration_until=event.registration_until,
         starts_at=event.starts_at,
         checkin_until=event.checkin_until,
+        sale_starts_at=event.sale_starts_at,
+        sale_hold=event.sale_hold,
+        sale_ended_at=event.sale_ended_at,
         is_active=event.is_active,
         display_code=event.display_code,
         phase=event.phase(),
@@ -103,8 +111,10 @@ async def create_event(payload: EventCreate, db: DbSession, company: OwnCompany)
     event = SaleEvent(
         company_id=company.id,
         name=payload.name.strip(),
+        registration_until=payload.registration_until,
         starts_at=payload.starts_at,
         checkin_until=payload.checkin_until,
+        sale_starts_at=payload.sale_starts_at,
         branches=branches,
     )
     db.add(event)
@@ -122,20 +132,19 @@ async def get_event(db: DbSession, event: CompanyEvent) -> EventOut:
 async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent) -> EventOut:
     if payload.name is not None:
         event.name = payload.name.strip()
-    if payload.starts_at is not None:
-        if payload.starts_at.tzinfo is None:
+    for field in ("registration_until", "starts_at", "checkin_until", "sale_starts_at"):
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        if value.tzinfo is None:
+            await db.rollback()
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vaqt mintaqasi ko'rsatilmagan")
-        event.starts_at = payload.starts_at
-    if payload.checkin_until is not None:
-        if payload.checkin_until.tzinfo is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vaqt mintaqasi ko'rsatilmagan")
-        event.checkin_until = payload.checkin_until
-    if event.checkin_until <= event.starts_at:
+        setattr(event, field, value)
+    if not check_period_order(
+        event.registration_until, event.starts_at, event.checkin_until, event.sale_starts_at
+    ):
         await db.rollback()
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Skanerlash tugash vaqti boshlanish vaqtidan keyin bo'lishi kerak",
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, PERIOD_ORDER_ERROR)
     if payload.is_active is not None:
         event.is_active = payload.is_active
     if payload.branch_ids is not None:
@@ -191,6 +200,30 @@ async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent)
 async def delete_event(db: DbSession, event: CompanyEvent) -> None:
     await db.delete(event)
     await db.commit()
+
+
+@router.post("/{event_id}/sale", response_model=EventOut, dependencies=[OwnerOnly])
+async def sale_action(payload: SaleActionRequest, db: DbSession, event: CompanyEvent) -> EventOut:
+    """Owner controls over the running sale: pause (hold) / resume calling,
+    end the sale, or reopen one that ended (including a premature auto-end)."""
+    if payload.action == "hold":
+        if event.sale_ended_at is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sotuv yakunlangan — avval qayta oching")
+        if not event.queue_started():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sotuv hali boshlanmagan")
+        event.sale_hold = True
+    elif payload.action == "resume":
+        event.sale_hold = False
+    elif payload.action == "end":
+        if event.sale_ended_at is None:
+            event.sale_ended_at = now_utc()
+        event.sale_hold = False
+    else:  # reopen
+        event.sale_ended_at = None
+        event.sale_hold = False
+    await db.commit()
+    queue_service.schedule_event_broadcast(event.id)
+    return await _event_out(db, event)
 
 
 @router.get("/{event_id}/state", dependencies=[AnyStaff])

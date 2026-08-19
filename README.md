@@ -17,15 +17,25 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 
 ## The core rule
 
-1. The owner creates a **sale event** with two times: `starts_at` (sale day begins) and
-   `checkin_until` (QR scanning deadline — **the client company sets this**).
-2. The Telegram bot registers clients any time before `checkin_until` and hands out **random,
-   non-sequential 4-letter uppercase codes** (AAAA–ZZZZ, unique per event).
-3. Until `checkin_until`, reception scans QR codes (or types the code). Calling is blocked.
-4. At `checkin_until` the queue starts. Order = **registration time in the bot**, among
-   **scanned tickets only**. The code itself and the arrival order don't matter.
-5. Late arrivals (scanned after the deadline) and skipped clients who return join the
-   **end-of-day group** (once; a second no-show cancels the ticket).
+1. The owner creates a **sale event** with three clearly separated periods:
+   **registration** (until `registration_until`), **QR scanning** (`starts_at` →
+   `checkin_until`) and the **sale** (`sale_starts_at`, start time only).
+2. The Telegram bot registers clients and hands out **random, non-sequential 4-letter
+   uppercase codes** (AAAA–ZZZZ, unique per event). Registration never closes until the
+   sale ends — clients registered after `registration_until` simply join the **end-of-day
+   group** once scanned.
+3. Reception scans QR codes (or types the code); each QR is **single-use**. Scans after
+   `checkin_until` keep working but go to the end-of-day group. The owner and scanners can
+   also add **walk-in clients** (name + phone) who go straight to the end of the queue and
+   get a QR + code of their own.
+4. At `sale_starts_at` the sale starts: every checked-in client gets a Telegram message
+   with their code, their **bot registration time (with milliseconds)** and how many people
+   are ahead. Order = **registration time in the bot**, among **scanned tickets only** —
+   before the sale starts no queue position is announced anywhere.
+5. The sale ends when the queue drains or when the owner ends it; the owner can also put it
+   **on hold** (calling pauses, scanning continues) and resume or reopen it.
+6. Skipped clients who return join the end-of-day group once; a second no-show cancels the
+   ticket.
 
 ## Features
 
@@ -39,8 +49,9 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 - **Desks ("tables")** — numbered desks, optionally pinned to a manager and a branch
   (numbers are unique per branch).
 - **Sale events** — many per company, each with its own dates (entered as Tashkent local time,
-  24-hour), live phase (`registration → checkin → queue`), a branch multiselect and an
-  unguessable public display link (`?branch=` pins a TV to one branch).
+  24-hour), live phase (`registration → checkin → queue / hold / ended`), owner sale controls
+  (hold / resume / end / reopen), a branch multiselect and an unguessable public display link
+  (`?branch=` pins a TV to one branch).
 - **Owner statistics** — `/api/stats/overview` aggregates for the dashboard charts: daily
   registrations/arrivals, hourly load, recent events and per-branch breakdown.
 - **Up to 3 parallel Telegram bots per company** (aiogram): trilingual conversation —
@@ -196,8 +207,10 @@ Follow the order — the dashboard checklist walks through the same steps:
 | CRUD | `/api/employees` (+ `/reset-password`) | owner | staff with generated passwords, per-branch |
 | CRUD | `/api/desks` | owner (read: staff) | manager desks, per-branch |
 | CRUD | `/api/events` (+ `/state`, `/tickets`, `/seed`) | owner (read: staff) | sale events (`branch_ids` multiselect) |
+| POST | `/api/events/{event}/sale` | owner | sale controls: `hold` / `resume` / `end` / `reopen` |
 | GET | `/api/stats/overview?days=N` | owner | dashboard chart aggregates |
-| POST | `/api/queue/{event}/checkin` | staff | QR code or 4-letter code |
+| POST | `/api/queue/{event}/checkin` | staff | QR code or 4-letter code (single-use) |
+| POST | `/api/queue/{event}/walkin` | owner/scanner | add a walk-in client to the end of the queue (returns QR) |
 | POST | `/api/queue/{event}/call` · `recall` · `serving` · `skip` · `done` · `cancel` | manager/owner | desk actions |
 | GET | `/api/public/display/{code}` · `/api/public/tickets/{code}` | public | TV board, client ticket |
 | WS | `/api/ws/display/{code}` · `/api/ws/staff/{event}?token=` | public / staff | live state push |
@@ -207,8 +220,9 @@ Follow the order — the dashboard checklist walks through the same steps:
 - Passwords hashed with bcrypt (off the event loop); JWT (HS256) access tokens; role checks
   on every route.
 - Staff endpoints are scoped to the caller's company — cross-tenant access returns 404.
-- The public display exposes numbers only (no names/phones); ticket pages are addressable
-  only by the unguessable QR code; display links use random codes.
+- The public display shows letter codes, client names and bot registration times (product
+  decision) — never phones or QR codes; ticket pages are addressable only by the unguessable
+  QR code; display links use random codes.
 - Telegram webhooks are validated with a per-company HMAC secret
   (`X-Telegram-Bot-Api-Secret-Token`); nginx rate-limits the API (20 r/s per IP)
   and auth endpoints (5 r/s per IP).

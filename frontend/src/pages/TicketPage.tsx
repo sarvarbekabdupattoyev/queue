@@ -69,6 +69,11 @@ export default function TicketPage() {
             {data.late && ' · kun oxiri navbati'}
           </p>
         )}
+        {data.status === 'checked_in' && data.position === null && (
+          <p className="hint" style={{ marginTop: 8 }}>
+            Navbat tartibi sotuv boshlanganda shu yerda va botda ko‘rinadi.
+          </p>
+        )}
         {data.status === 'called' && data.desk_number !== null && (
           <p style={{ marginTop: 8, color: 'var(--amber)', fontWeight: 700, fontSize: 20 }}>
             {data.desk_number}-stolga yaqinlashing

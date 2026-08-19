@@ -7,18 +7,13 @@ from app.db.base import now_utc
 from app.db.session import SessionFactory
 from app.models import SaleEvent
 from app.services import ticket_service
-from tests.conftest import auth, create_company, register_owner
+from tests.conftest import auth, create_company, event_times, register_owner
 
 NOW = now_utc
 
 
 async def make_event(client, token, *, branch_ids=None, name="Sotuv kuni"):
-    payload = {
-        "name": name,
-        "starts_at": (NOW() - timedelta(minutes=60)).isoformat(),
-        "checkin_until": (NOW() + timedelta(minutes=60)).isoformat(),
-        "branch_ids": branch_ids or [],
-    }
+    payload = {"name": name, **event_times(), "branch_ids": branch_ids or []}
     response = await client.post("/api/events", json=payload, headers=auth(token))
     assert response.status_code == 201, response.text
     return response.json()

@@ -118,8 +118,10 @@ export default function DisplayPage() {
   }
 
   const timeoutMs = state.call_timeout_minutes * 60000
-  const untilQueue = new Date(state.event.checkin_until).getTime() - now
-  const queueRunning = state.event.phase === 'queue' || state.event.phase === 'closed'
+  const untilSale = new Date(state.event.sale_starts_at).getTime() - now
+  const saleEnded = state.event.phase === 'ended'
+  const saleHold = state.event.phase === 'hold'
+  const queueRunning = state.event.phase === 'queue' || saleHold || state.event.phase === 'closed'
   // a branch TV shows only its branch's calls, queue and stats
   const branchSection =
     branchParam !== null ? (state.by_branch.find((b) => b.id === branchParam) ?? null) : null
@@ -171,12 +173,23 @@ export default function DisplayPage() {
             <span>Hozir chaqirilmoqda</span>
             <span className="cnt">{called.length ? `${called.length} ta stol` : ''}</span>
           </div>
-          {!queueRunning && untilQueue > 0 ? (
+          {saleHold && (
+            <div className="hold-banner">
+              ⏸ Sotuv vaqtincha to‘xtatib turildi — navbat tez orada davom etadi
+            </div>
+          )}
+          {saleEnded ? (
+            <div className="display-empty">
+              Sotuv yakunlandi.
+              <br />
+              Tashrifingiz uchun rahmat!
+            </div>
+          ) : !queueRunning && untilSale > 0 ? (
             <div className="display-countdown">
               <div className="display-eyebrow" style={{ justifyContent: 'center' }}>
-                <span>Navbat boshlanishiga qoldi</span>
+                <span>Sotuv boshlanishiga qoldi</span>
               </div>
-              <div className="big">{formatLongCountdown(untilQueue)}</div>
+              <div className="big">{formatLongCountdown(untilSale)}</div>
               <p style={{ marginTop: '2vh', color: 'var(--dsp-dim)', fontSize: 'clamp(13px,2vh,26px)' }}>
                 Kelganingizni qabulxonada QR-kod bilan belgilating.
                 <br />

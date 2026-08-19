@@ -5,9 +5,16 @@ from sqlalchemy import select
 
 from app.api.deps import CompanyEvent, DbSession, ManagerUser, StaffUser, require_roles
 from app.models import Branch, Desk, Ticket, User, UserRole
-from app.schemas.event import CallNextRequest, CheckinRequest, TicketActionRequest, TicketOut
+from app.schemas.event import (
+    CallNextRequest,
+    CheckinRequest,
+    TicketActionRequest,
+    TicketOut,
+    WalkinCreate,
+)
 from app.services import queue_service
 from app.services.errors import DomainError
+from app.services.qr_service import qr_data_url_async
 
 router = APIRouter(prefix="/queue", tags=["queue"])
 
@@ -78,6 +85,45 @@ async def check_in(
         "kind": result["kind"],
         "message": result["message"],
         "ticket": _out(ticket, position=position),
+    }
+
+
+@router.post("/{event_id}/walkin", status_code=status.HTTP_201_CREATED)
+async def walkin(
+    payload: WalkinCreate,
+    db: DbSession,
+    event: CompanyEvent,
+    user: Annotated[User, Depends(require_roles(UserRole.OWNER, UserRole.SCANNER))],
+) -> dict:
+    """Owner/scanner adds a client at the door (no Telegram needed). The
+    client gets a code + QR and goes straight to the END of the queue."""
+    branch_id = payload.branch_id
+    if event.branch_ids():
+        # walk-ins queue at ONE branch: the payload's, or the staff member's own
+        branch_id = branch_id if branch_id is not None else user.branch_id
+        if branch_id not in event.branch_ids():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Filial tanlanmagan yoki bu tadbirga tegishli emas"
+            )
+    else:
+        branch_id = None
+    try:
+        ticket = await queue_service.staff_add_ticket(
+            db,
+            event,
+            first_name=payload.first_name.strip(),
+            last_name=payload.last_name.strip(),
+            phone=payload.phone,
+            branch_id=branch_id,
+        )
+    except DomainError as exc:
+        _raise(exc)
+    position = await queue_service.position_of(db, ticket)
+    return {
+        "ok": True,
+        "message": f"№{ticket.number} navbat oxiriga qo'shildi",
+        "ticket": _out(ticket, position=position),
+        "qr": await qr_data_url_async(ticket.code),
     }
 
 

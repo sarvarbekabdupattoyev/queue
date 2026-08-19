@@ -81,7 +81,9 @@ export default function ManagerPage() {
       : state?.stats
   const timeoutMs = (state?.call_timeout_minutes ?? 3) * 60000
   const queueStarted = state ? state.event.phase === 'queue' : false
-  const untilQueue = state ? new Date(state.event.checkin_until).getTime() - now : 0
+  const saleHold = state?.event.phase === 'hold'
+  const saleEnded = state?.event.phase === 'ended'
+  const untilSale = state ? new Date(state.event.sale_starts_at).getTime() - now : 0
 
   const act = async (path: string, body: Record<string, unknown>, confirmText?: string) => {
     if (confirmText && !(await confirm({ title: confirmText, confirmLabel: 'Ha', icon: IconSkip })))
@@ -140,11 +142,21 @@ export default function ManagerPage() {
                   chaqirish uchun rahbar stolni filialga biriktirishi kerak.
                 </p>
               )}
-              {!queueStarted && state && (
+              {saleHold && (
+                <p className="hint" style={{ marginBottom: 12, color: 'var(--amber)' }}>
+                  ⏸ Sotuv to‘xtatib turilgan — rahbar davom ettirgach chaqiruv ochiladi.
+                </p>
+              )}
+              {saleEnded && (
                 <p className="hint" style={{ marginBottom: 12 }}>
-                  Navbat hali boshlanmagan — skanerlash tugashiga{' '}
+                  Sotuv yakunlangan — chaqiruv yopiq.
+                </p>
+              )}
+              {!queueStarted && !saleHold && !saleEnded && state && (
+                <p className="hint" style={{ marginBottom: 12 }}>
+                  Sotuv hali boshlanmagan — boshlanishiga{' '}
                   <b className="mono" style={{ color: 'var(--amber)' }}>
-                    {formatLongCountdown(untilQueue)}
+                    {formatLongCountdown(untilSale)}
                   </b>{' '}
                   qoldi.
                 </p>

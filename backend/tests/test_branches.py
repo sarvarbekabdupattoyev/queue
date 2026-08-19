@@ -8,7 +8,7 @@ from app.db.session import SessionFactory
 from app.models import SaleEvent
 from app.services import ticket_service
 from app.services.errors import DomainError
-from tests.conftest import auth, create_company, register_owner
+from tests.conftest import auth, create_company, event_times, register_owner, started_sale_times
 
 NOW = now_utc
 
@@ -26,8 +26,7 @@ async def make_event(client, token, branch_ids: list[int], **kw) -> dict:
         "/api/events",
         json={
             "name": kw.get("name", "Sotuv kuni"),
-            "starts_at": (NOW() - timedelta(minutes=60)).isoformat(),
-            "checkin_until": (NOW() + timedelta(minutes=60)).isoformat(),
+            **event_times(),
             "branch_ids": branch_ids,
         },
         headers=auth(token),
@@ -56,12 +55,7 @@ async def make_ticket(
 
 async def close_checkin(client, token, event_id) -> None:
     response = await client.patch(
-        f"/api/events/{event_id}",
-        json={
-            "starts_at": (NOW() - timedelta(hours=3)).isoformat(),
-            "checkin_until": (NOW() - timedelta(seconds=1)).isoformat(),
-        },
-        headers=auth(token),
+        f"/api/events/{event_id}", json=started_sale_times(), headers=auth(token)
     )
     assert response.status_code == 200, response.text
 
@@ -132,14 +126,18 @@ async def test_one_event_runs_in_many_branches_with_separate_queues(client):
     assert next_a == [t_a1["number"], t_a2["number"]]
     assert by_branch[branch_b["id"]]["stats"]["waiting"] == 2
 
-    # positions are branch-local: b2 is 2nd in Sergeli even though 3 people
-    # registered earlier overall
+    # before the sale starts the ticket page announces no position
     ticket_page = await client.get(f"/api/public/tickets/{t_b2['code']}")
-    assert ticket_page.json()["position"] == 2
+    assert ticket_page.json()["position"] is None
     assert ticket_page.json()["waiting_count"] == 2
     assert ticket_page.json()["branch_name"] == "Sergeli"
 
     await close_checkin(client, token, event["id"])
+
+    # positions are branch-local: b2 is 2nd in Sergeli even though 3 people
+    # registered earlier overall (announced once the sale runs)
+    ticket_page = await client.get(f"/api/public/tickets/{t_b2['code']}")
+    assert ticket_page.json()["position"] == 2
 
     # each desk pulls from ITS branch queue only
     call_a = await client.post(
@@ -345,12 +343,7 @@ async def test_event_branch_validation_and_removal_guard(client):
     # foreign/unknown branch id is rejected at event creation
     bad = await client.post(
         "/api/events",
-        json={
-            "name": "Sotuv",
-            "starts_at": (NOW() - timedelta(minutes=5)).isoformat(),
-            "checkin_until": (NOW() + timedelta(minutes=60)).isoformat(),
-            "branch_ids": [branch["id"] + 999],
-        },
+        json={"name": "Sotuv", **event_times(), "branch_ids": [branch["id"] + 999]},
         headers=auth(token),
     )
     assert bad.status_code == 400

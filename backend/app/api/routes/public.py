@@ -30,7 +30,8 @@ async def ticket_state(code: str, db: DbSession) -> dict:
     event = await db.get(SaleEvent, ticket.event_id)
     # the ticket's own branch — one event may run in several
     branch = await db.get(Branch, ticket.branch_id) if ticket.branch_id else None
-    position = await queue_service.position_of(db, ticket)
+    # the queue order is announced only once the sale starts
+    position = await queue_service.position_of(db, ticket) if event.queue_started() else None
     desk_numbers = await queue_service.desk_numbers_for(db, [ticket])
     return {
         "number": ticket.number,

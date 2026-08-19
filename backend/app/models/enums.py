@@ -23,6 +23,7 @@ class TicketStatus(str, enum.Enum):
 
 class TicketSource(str, enum.Enum):
     BOT = "bot"
+    STAFF = "staff"                # walk-in added by the owner/scanner
     SEED = "seed"
 
 
@@ -30,6 +31,8 @@ class EventPhase(str, enum.Enum):
     """Derived lifecycle of a sale event (not stored)."""
 
     CLOSED = "closed"              # deactivated by the owner
-    REGISTRATION = "registration"  # before the sale day starts
-    CHECKIN = "checkin"            # sale day: QR scanning window is open
-    QUEUE = "queue"                # scanning window over: queue is running
+    REGISTRATION = "registration"  # on-time bot registration period
+    CHECKIN = "checkin"            # QR scanning period, before the sale starts
+    QUEUE = "queue"                # sale running: calling is open
+    HOLD = "hold"                  # sale paused by the owner; calling blocked
+    ENDED = "ended"                # sale finished (queue drained or by owner)

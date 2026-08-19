@@ -18,7 +18,7 @@ from app.services.telegram.handlers import (
     build_info_text,
     split_full_name,
 )
-from tests.conftest import auth, create_company, register_owner
+from tests.conftest import auth, create_company, event_times, register_owner
 
 NOW = now_utc
 
@@ -59,6 +59,33 @@ def test_i18n_falls_back_to_uzbek():
         assert t(lang, "ntf_called", number=1, desk=2, minutes=3)
 
 
+def test_menu_hides_ticket_buttons_until_registered():
+    """An unregistered chat sees only the info and language buttons."""
+    from app.services.telegram.handlers import main_menu
+
+    def texts(markup):
+        return {button.text for row in markup.keyboard for button in row}
+
+    for lang in i18n.LANGS:
+        anonymous = texts(main_menu(lang, registered=False))
+        registered = texts(main_menu(lang, registered=True))
+        assert t(lang, "btn_ticket") not in anonymous
+        assert t(lang, "btn_status") not in anonymous
+        assert t(lang, "btn_info") in anonymous and t(lang, "btn_language") in anonymous
+        assert t(lang, "btn_ticket") in registered and t(lang, "btn_status") in registered
+
+
+def test_only_uzbek_phone_numbers_are_accepted():
+    from app.core.phone import normalize_phone
+
+    assert normalize_phone("+998 90 123 45 67") == "+998901234567"
+    assert normalize_phone("901234567") == "+998901234567"
+    # anything that is not an Uzbek +998 number is refused
+    assert normalize_phone("+7 900 123 45 67") is None
+    assert normalize_phone("+1 202 555 0100") is None
+    assert normalize_phone("+99890123456") is None  # too short
+
+
 def test_split_full_name_parses_one_line_fio():
     assert split_full_name("sardor rahimov akmal o'g'li") == ("Sardor", "Rahimov Akmal O'g'li")
     assert split_full_name("Dilnoza Xolmatova") == ("Dilnoza", "Xolmatova")
@@ -92,11 +119,7 @@ async def test_notifications_use_the_client_language(client, monkeypatch):
     company = await create_company(client, token)
     event_resp = await client.post(
         "/api/events",
-        json={
-            "name": "Sotuv kuni",
-            "starts_at": (NOW() - timedelta(minutes=60)).isoformat(),
-            "checkin_until": (NOW() + timedelta(minutes=60)).isoformat(),
-        },
+        json={"name": "Sotuv kuni", **event_times()},
         headers=auth(token),
     )
     event_id = event_resp.json()["id"]
@@ -124,8 +147,10 @@ async def test_notifications_use_the_client_language(client, monkeypatch):
     await _wait_for(lambda: len(sent) == 1)
     chat_id, text = sent[0]
     assert chat_id == 555
+    # before the sale starts the notification carries NO queue position
     assert text == t("ru", "ntf_checkin_prequeue", number=number,
-                     time=queue_service.fmt_local(event.checkin_until), position=1)
+                     time=queue_service.fmt_local(event.sale_starts_at))
+    assert "мест" not in text
 
 
 async def test_company_info_text_lists_everything(client):
@@ -145,8 +170,9 @@ async def test_company_info_text_lists_everything(client):
         "/api/events",
         json={
             "name": "Katta sotuv",
-            "starts_at": (NOW() + timedelta(days=1)).isoformat(),
-            "checkin_until": (NOW() + timedelta(days=1, hours=2)).isoformat(),
+            **event_times(
+                reg_min=24 * 60, starts_min=24 * 60, checkin_min=26 * 60, sale_min=26 * 60
+            ),
         },
         headers=auth(token),
     )

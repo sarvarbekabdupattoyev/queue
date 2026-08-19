@@ -14,9 +14,18 @@ def _display_code() -> str:
 
 
 class SaleEvent(Base):
-    """A sale day. Clients register via the bot beforehand; on the day they
-    check in with their QR until ``checkin_until``, after which the queue
-    starts, ordered by bot registration time among checked-in tickets."""
+    """A sale day, run in three clearly separated periods:
+
+    1. registration (… → ``registration_until``): the bot registers clients
+       and hands out QR + code. Registration never actually closes until the
+       sale ends — clients who register later simply join the late group.
+    2. QR scanning (``starts_at`` → ``checkin_until``): reception scans QR
+       codes. Scans after ``checkin_until`` are still accepted but go to the
+       late (end-of-day) group.
+    3. sale (``sale_starts_at`` → until the queue drains or the owner ends
+       it): calling is open. The owner can put the sale ON HOLD (calling
+       pauses, scanning continues) and resume it where it stopped.
+    """
 
     __tablename__ = "sale_events"
 
@@ -25,8 +34,19 @@ class SaleEvent(Base):
         ForeignKey("companies.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(120))
+    # end of the ON-TIME registration period: clients registered after this
+    # moment get a QR too, but land in the late group once scanned
+    registration_until: Mapped[datetime] = mapped_column(UTCDateTime)
+    # QR scanning period (start is informational; the end is the on-time cut)
     starts_at: Mapped[datetime] = mapped_column(UTCDateTime)
     checkin_until: Mapped[datetime] = mapped_column(UTCDateTime)
+    # the sale (calling) starts here; it has no fixed end
+    sale_starts_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # owner controls over the running sale
+    sale_hold: Mapped[bool] = mapped_column(Boolean, default=False)
+    sale_ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # set once the sale-start Telegram burst went out (atomic claim)
+    sale_notified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # public, unguessable code for the TV display page
     display_code: Mapped[str] = mapped_column(
@@ -56,18 +76,30 @@ class SaleEvent(Base):
         at = at or now_utc()
         if not self.is_active:
             return EventPhase.CLOSED
-        if at < self.starts_at:
+        if self.sale_ended_at is not None:
+            return EventPhase.ENDED
+        if at < self.registration_until:
             return EventPhase.REGISTRATION
-        if at < self.checkin_until:
+        if at < self.sale_starts_at:
             return EventPhase.CHECKIN
+        if self.sale_hold:
+            return EventPhase.HOLD
         return EventPhase.QUEUE
 
     def registration_open(self, at: datetime | None = None) -> bool:
-        """Bot hands out numbers while the event is active and the scanning
-        window has not closed yet."""
-        at = at or now_utc()
-        return self.is_active and at < self.checkin_until
+        """The bot hands out codes for as long as the event is active and the
+        sale has not ended — late registrants just join the late group."""
+        return self.is_active and self.sale_ended_at is None
 
     def queue_started(self, at: datetime | None = None) -> bool:
+        """The sale (calling period) has begun and is not over. A sale on
+        hold still counts as started — only calling is paused."""
         at = at or now_utc()
-        return self.is_active and at >= self.checkin_until
+        return self.is_active and self.sale_ended_at is None and at >= self.sale_starts_at
+
+    def on_time_checkin(self, ticket_registered_at: datetime, at: datetime | None = None) -> bool:
+        """A scan joins the main queue only when the client registered inside
+        the registration period AND the scan lands inside the QR window;
+        everything else goes to the late (end-of-day) group."""
+        at = at or now_utc()
+        return ticket_registered_at <= self.registration_until and at < self.checkin_until

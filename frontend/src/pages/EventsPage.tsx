@@ -15,9 +15,11 @@ import { ActionForm, EmptyState, Field, Modal, Spinner, useConfirm, useToast } f
 import { formatDateTime, isoToTashkentParts, tashkentPartsToIso } from '../lib/format'
 
 export const PHASE_LABEL: Record<EventPhase, { text: string; tone: string }> = {
-  registration: { text: 'Ro‘yxat ochiq', tone: 'blue' },
-  checkin: { text: 'Skanerlash davom etmoqda', tone: 'amber' },
-  queue: { text: 'Navbat ishlamoqda', tone: 'teal' },
+  registration: { text: 'Ro‘yxat davri', tone: 'blue' },
+  checkin: { text: 'QR skanerlash davri', tone: 'amber' },
+  queue: { text: 'Sotuv davom etmoqda', tone: 'teal' },
+  hold: { text: 'Sotuv to‘xtatib turilgan', tone: 'amber' },
+  ended: { text: 'Sotuv yakunlandi', tone: 'dim' },
   closed: { text: 'Yopilgan', tone: 'dim' },
 }
 
@@ -87,19 +89,27 @@ function TashkentTimeField({
 
 interface EventForm {
   name: string
+  reg_date: string
+  reg_time: string
   starts_date: string
   starts_time: string
   checkin_date: string
   checkin_time: string
+  sale_date: string
+  sale_time: string
   branch_ids: number[]
 }
 
 const EMPTY_FORM: EventForm = {
   name: '',
+  reg_date: '',
+  reg_time: '08:00',
   starts_date: '',
-  starts_time: '09:00',
+  starts_time: '08:00',
   checkin_date: '',
   checkin_time: '10:00',
+  sale_date: '',
+  sale_time: '10:00',
   branch_ids: [],
 }
 
@@ -198,14 +208,20 @@ export default function EventsPage() {
   })
 
   const openEdit = (event: SaleEvent) => {
+    const reg = isoToTashkentParts(event.registration_until)
     const starts = isoToTashkentParts(event.starts_at)
     const checkin = isoToTashkentParts(event.checkin_until)
+    const sale = isoToTashkentParts(event.sale_starts_at)
     setForm({
       name: event.name,
+      reg_date: reg.date,
+      reg_time: reg.time,
       starts_date: starts.date,
       starts_time: starts.time,
       checkin_date: checkin.date,
       checkin_time: checkin.time,
+      sale_date: sale.date,
+      sale_time: sale.time,
       branch_ids: event.branches.map((b) => b.id),
     })
     setEditing(event)
@@ -234,8 +250,9 @@ export default function EventsPage() {
     <>
       <div className="page-actions">
         <span className="hint">
-          Bot tadbir boshlanishidan skanerlash tugashigacha kod beradi; keyin navbat ro‘yxat
-          vaqti bo‘yicha ishlaydi. Yangi tadbir — yuqoridagi tugma orqali.
+          Uch davr: botda ro‘yxat → QR skanerlash → sotuv. Ro‘yxat va skanerlash o‘z davridan
+          keyin ham yopilmaydi — kechikkanlar navbat oxiriga qo‘shiladi. Yangi tadbir —
+          yuqoridagi tugma orqali.
         </span>
       </div>
 
@@ -286,8 +303,8 @@ export default function EventsPage() {
                 <thead>
                   <tr>
                     <th>Tadbir</th>
-                    <th>Boshlanish</th>
-                    <th>Skanerlash tugashi</th>
+                    <th>QR skanerlash</th>
+                    <th>Sotuv boshlanishi</th>
                     <th>Holat</th>
                     <th style={{ textAlign: 'right' }}>Ro‘yxat / Kelgan</th>
                     <th></th>
@@ -318,7 +335,7 @@ export default function EventsPage() {
                           )}
                         </td>
                         <td className="muted">{formatDateTime(event.starts_at)}</td>
-                        <td className="muted">{formatDateTime(event.checkin_until)}</td>
+                        <td className="muted">{formatDateTime(event.sale_starts_at)}</td>
                         <td>
                           <span className={`badge ${phase.tone}`}>{phase.text}</span>
                         </td>
@@ -364,7 +381,7 @@ export default function EventsPage() {
                       </span>
                     </span>
                     <span className="foot">
-                      <span>Skanerlash: {formatDateTime(event.checkin_until)}</span>
+                      <span>Sotuv: {formatDateTime(event.sale_starts_at)}</span>
                       <span className="mono">
                         {event.ticket_count} / {event.checked_in_count}
                       </span>
@@ -380,15 +397,17 @@ export default function EventsPage() {
       {editing && (
         <Modal
           title={editing === 'new' ? 'Yangi sotuv tadbiri' : 'Tadbirni tahrirlash'}
-          description="Skanerlash tugagach chaqiruv ochiladi — tartib botdan ro‘yxatdan o‘tish vaqti bo‘yicha."
+          description="Uch davr: 1) botda ro‘yxat, 2) QR skanerlash, 3) sotuv. Barcha vaqtlar Toshkent vaqti, 24 soatlik."
           onClose={() => setEditing(null)}
         >
           <ActionForm
             onSubmit={async () => {
               const payload = {
                 name: form.name,
+                registration_until: tashkentPartsToIso(form.reg_date, form.reg_time),
                 starts_at: tashkentPartsToIso(form.starts_date, form.starts_time),
                 checkin_until: tashkentPartsToIso(form.checkin_date, form.checkin_time),
+                sale_starts_at: tashkentPartsToIso(form.sale_date, form.sale_time),
                 branch_ids: form.branch_ids,
               }
               if (editing === 'new') await api<SaleEvent>('/events', { body: payload })
@@ -409,19 +428,60 @@ export default function EventsPage() {
                     minLength={2}
                   />
                 </Field>
+
+                <div className="card-title" style={{ marginTop: 4 }}>1-davr · Ro‘yxatdan o‘tish</div>
+                <p className="hint" style={{ marginTop: -4 }}>
+                  Mijozlar botda ro‘yxatdan o‘tib QR va kod oladi. Bu vaqtdan keyin ham
+                  ro‘yxat yopilmaydi — lekin keyin yozilganlar navbat oxiriga qo‘shiladi.
+                </p>
                 <TashkentTimeField
-                  label="Sotuv boshlanish vaqti (Toshkent vaqti, 24 soatlik)"
+                  label="Ro‘yxat davri tugashi"
+                  date={form.reg_date}
+                  time={form.reg_time}
+                  onDate={(v) =>
+                    setForm((f) => ({
+                      ...f,
+                      reg_date: v,
+                      starts_date: f.starts_date || v,
+                      checkin_date: f.checkin_date || v,
+                      sale_date: f.sale_date || v,
+                    }))
+                  }
+                  onTime={(v) => setForm((f) => ({ ...f, reg_time: v }))}
+                />
+
+                <div className="card-title" style={{ marginTop: 4 }}>2-davr · QR skanerlash</div>
+                <p className="hint" style={{ marginTop: -4 }}>
+                  Qabulxonada QR belgilash davri. Bu vaqt tugagach ham skanerlash to‘xtamaydi —
+                  keyin kelganlar navbat oxiriga qo‘shiladi.
+                </p>
+                <TashkentTimeField
+                  label="Skanerlash boshlanishi"
                   date={form.starts_date}
                   time={form.starts_time}
-                  onDate={(v) => setForm((f) => ({ ...f, starts_date: v, checkin_date: f.checkin_date || v }))}
+                  onDate={(v) => setForm((f) => ({ ...f, starts_date: v }))}
                   onTime={(v) => setForm((f) => ({ ...f, starts_time: v }))}
                 />
                 <TashkentTimeField
-                  label="QR skanerlash tugash vaqti — navbat shu paytda boshlanadi (Toshkent vaqti, 24 soatlik)"
+                  label="Skanerlash tugashi"
                   date={form.checkin_date}
                   time={form.checkin_time}
                   onDate={(v) => setForm((f) => ({ ...f, checkin_date: v }))}
                   onTime={(v) => setForm((f) => ({ ...f, checkin_time: v }))}
+                />
+
+                <div className="card-title" style={{ marginTop: 4 }}>3-davr · Sotuv</div>
+                <p className="hint" style={{ marginTop: -4 }}>
+                  Faqat boshlanish vaqti kiritiladi. Sotuv navbatdagi barcha mijozlar
+                  yakunlangach o‘zi tugaydi yoki tadbir sahifasidan qo‘lda yakunlanadi;
+                  uni vaqtincha to‘xtatib turish (pauza) ham mumkin.
+                </p>
+                <TashkentTimeField
+                  label="Sotuv boshlanishi"
+                  date={form.sale_date}
+                  time={form.sale_time}
+                  onDate={(v) => setForm((f) => ({ ...f, sale_date: v }))}
+                  onTime={(v) => setForm((f) => ({ ...f, sale_time: v }))}
                 />
                 {hasBranches && (
                   <div className="field">

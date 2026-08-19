@@ -72,12 +72,22 @@ git checkout dev  && git push origin dev
 
 ## Domain invariants (never break these)
 
+- Three event periods: registration (→ `registration_until`), QR scanning
+  (`starts_at` → `checkin_until`), sale (from `sale_starts_at`, no fixed
+  end). Registration and scanning stay open past their period until the
+  sale ends — latecomers just join the end-of-day group.
 - Queue order = `registered_at` (bot registration time) among CHECKED_IN
-  tickets; late check-ins / skip-returns go to the end-of-day group
+  tickets; late registrations, late check-ins, skip-returns and staff
+  walk-ins go to the end-of-day group
   (`queue_order = LATE_ORDER_BASE + event.late_seq`). Ticket "numbers" are
   random 4-letter uppercase codes, unique per event — never sequential,
-  never reused.
-- Calling is blocked until `event.checkin_until` passes.
+  never reused. QR codes are single-use: a scanned/staff-added ticket can
+  never check in again.
+- Calling is blocked until `event.sale_starts_at` passes, while the sale is
+  on hold, and after it ends (queue drained, or the owner ended it; reopen
+  is allowed). No queue position is shown anywhere before the sale starts;
+  at sale start every checked-in client gets code + registration time (ms)
+  + people-ahead via the bot, exactly once (`sale_notified` claim).
 - A second no-show cancels the ticket; the first sends it to end-of-day once.
 - Tenancy: every staff query is scoped by `company_id`; cross-tenant access
   returns 404 (never 403 — don't leak existence).

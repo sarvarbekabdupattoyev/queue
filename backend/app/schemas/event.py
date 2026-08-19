@@ -1,9 +1,11 @@
 import re
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import EventPhase, TicketSource, TicketStatus
+from app.schemas.auth import PhoneMixin
 
 # the queue "number" is a random 4-letter uppercase code (see ticket_service)
 NUMBER_RE = re.compile(r"^[A-Z]{4}$")
@@ -23,29 +25,56 @@ class EventBranchOut(BaseModel):
     name: str
 
 
+PERIOD_ORDER_ERROR = (
+    "Davrlar tartibi: ro'yxat tugashi ≤ skanerlash boshlanishi < skanerlash "
+    "tugashi ≤ sotuv boshlanishi"
+)
+
+
+def check_period_order(
+    registration_until: datetime,
+    starts_at: datetime,
+    checkin_until: datetime,
+    sale_starts_at: datetime,
+) -> bool:
+    return registration_until <= starts_at < checkin_until <= sale_starts_at
+
+
 class EventCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
+    # the three periods: registration → QR scanning → sale (start only)
+    registration_until: datetime
     starts_at: datetime
     checkin_until: datetime
+    sale_starts_at: datetime
     # one event can run in several branches at once (multiselect)
     branch_ids: list[int] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def _check_window(self) -> "EventCreate":
-        if self.starts_at.tzinfo is None or self.checkin_until.tzinfo is None:
+        times = (self.registration_until, self.starts_at, self.checkin_until, self.sale_starts_at)
+        if any(t.tzinfo is None for t in times):
             raise ValueError("Vaqtlar vaqt mintaqasi bilan yuborilishi kerak (ISO 8601)")
-        if self.checkin_until <= self.starts_at:
-            raise ValueError("Skanerlash tugash vaqti boshlanish vaqtidan keyin bo'lishi kerak")
+        if not check_period_order(*times):
+            raise ValueError(PERIOD_ORDER_ERROR)
         return self
 
 
 class EventUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
+    registration_until: datetime | None = None
     starts_at: datetime | None = None
     checkin_until: datetime | None = None
+    sale_starts_at: datetime | None = None
     is_active: bool | None = None
     # None = unchanged; a list replaces the branch set
     branch_ids: list[int] | None = Field(default=None, max_length=50)
+
+
+class SaleActionRequest(BaseModel):
+    """Owner controls over the running sale."""
+
+    action: Literal["hold", "resume", "end", "reopen"]
 
 
 class EventOut(BaseModel):
@@ -53,8 +82,12 @@ class EventOut(BaseModel):
 
     id: int
     name: str
+    registration_until: datetime
     starts_at: datetime
     checkin_until: datetime
+    sale_starts_at: datetime
+    sale_hold: bool
+    sale_ended_at: datetime | None
     is_active: bool
     display_code: str
     phase: EventPhase
@@ -119,3 +152,12 @@ class TicketActionRequest(BaseModel):
 
 class SeedRequest(BaseModel):
     count: int = Field(default=10, ge=1, le=100)
+
+
+class WalkinCreate(PhoneMixin):
+    """A client added at the door by the owner or the QR scanner — goes
+    straight to the end of the queue."""
+
+    first_name: str = Field(min_length=2, max_length=64)
+    last_name: str = Field(default="", max_length=64)
+    branch_id: int | None = None

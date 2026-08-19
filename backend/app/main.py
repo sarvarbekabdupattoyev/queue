@@ -33,6 +33,46 @@ logging.basicConfig(
 log = logging.getLogger("navbat")
 
 
+SALE_WATCH_INTERVAL_S = 15
+
+
+async def sale_start_watcher() -> None:
+    """Fires the one-time sale-start burst: when ``sale_starts_at`` passes,
+    every checked-in client gets their code, registration time and position.
+    The per-event claim is atomic, so N workers running this loop send once."""
+    from sqlalchemy import select
+
+    from app.db.base import now_utc
+    from app.db.session import SessionFactory
+    from app.models import SaleEvent
+    from app.services import queue_service
+
+    while True:
+        await asyncio.sleep(SALE_WATCH_INTERVAL_S)
+        try:
+            async with SessionFactory() as db:
+                due = (
+                    await db.scalars(
+                        select(SaleEvent).where(
+                            SaleEvent.is_active.is_(True),
+                            SaleEvent.sale_notified.is_(False),
+                            SaleEvent.sale_ended_at.is_(None),
+                            SaleEvent.sale_starts_at <= now_utc(),
+                        )
+                    )
+                ).all()
+                for event in due:
+                    if not await queue_service.claim_sale_notification(db, event.id):
+                        continue
+                    sent = await queue_service.notify_sale_started(db, event)
+                    queue_service.schedule_event_broadcast(event.id)
+                    log.info("Sale started for event %s — %s clients notified", event.id, sent)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("sale-start watcher iteration failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -49,13 +89,16 @@ async def lifespan(app: FastAPI):
     else:
         await bot_manager.start_all()
         log.info("SmartNavbat API started (single-process mode, embedded bots)")
+    watcher = asyncio.create_task(sale_start_watcher(), name="sale-watcher")
 
     yield
 
-    if subscriber is not None:
-        subscriber.cancel()
+    for task in (subscriber, watcher):
+        if task is None:
+            continue
+        task.cancel()
         try:
-            await subscriber
+            await task
         except (asyncio.CancelledError, Exception):
             pass
     await broadcast.shutdown()

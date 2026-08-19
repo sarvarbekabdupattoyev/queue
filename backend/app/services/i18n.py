@@ -199,6 +199,14 @@ _T: dict[str, dict[str, str]] = {
         "en": "Unfortunately, registration for this event has closed.",
     },
     "registered_ok": {"uz": "✅ Ro'yxatdan o'tdingiz!", "ru": "✅ Вы зарегистрированы!", "en": "✅ You are registered!"},
+    "registered_ok_late": {
+        "uz": "✅ Ro'yxatga olindingiz! Asosiy ro'yxat davri tugagani uchun QR skanerlangach "
+              "kun oxiri (oxirgi) navbatga qo'shilasiz.",
+        "ru": "✅ Вы зарегистрированы! Основной период регистрации завершился, поэтому после "
+              "сканирования QR вы попадёте в очередь конца дня.",
+        "en": "✅ You are registered! The main registration period is over, so after your QR "
+              "is scanned you will join the end-of-day queue.",
+    },
     "not_registered_yet": {
         "uz": "Siz hali ro'yxatdan o'tmagansiz. /start ni bosing.",
         "ru": "Вы ещё не зарегистрированы. Нажмите /start.",
@@ -250,12 +258,12 @@ _T: dict[str, dict[str, str]] = {
         "en": "Your code: №{number}. There are {ahead} people ahead of you.",
     },
     "your_pos_prequeue": {
-        "uz": "Sizning kodingiz: №{number}. Navbat {time} da boshlanadi — hozircha "
-              "{position}-o'rindasiz.",
-        "ru": "Ваш код: №{number}. Очередь начнётся в {time} — сейчас вы на "
-              "{position}-м месте.",
-        "en": "Your code: №{number}. The queue starts at {time} — you are currently "
-              "in position {position}.",
+        "uz": "Sizning kodingiz: №{number}. Kelganingiz qayd etilgan. Sotuv {time} da "
+              "boshlanadi — navbat tartibi shu paytda yuboriladi.",
+        "ru": "Ваш код: №{number}. Ваша явка отмечена. Продажа начнётся в {time} — "
+              "порядок очереди придёт в этот момент.",
+        "en": "Your code: №{number}. Your arrival is recorded. The sale starts at {time} — "
+              "your place in the queue will be sent then.",
     },
     "your_called": {
         "uz": "Sizning kodingiz: №{number} — chaqirilgansiz! {desk}-stolga yaqinlashing.",
@@ -300,22 +308,33 @@ _T: dict[str, dict[str, str]] = {
     },
     # ------------------------------------------------- queue notifications ---
     "ntf_checkin_prequeue": {
-        "uz": "✅ Kelganingiz qayd etildi (№{number}).\nNavbat {time} da boshlanadi. Tartib "
-              "botdan ro'yxatdan o'tgan vaqt bo'yicha belgilanadi — hozircha siz "
-              "{position}-o'rindasiz.",
-        "ru": "✅ Ваша явка отмечена (№{number}).\nОчередь начнётся в {time}. Порядок — по "
-              "времени регистрации в боте; сейчас вы на {position}-м месте.",
-        "en": "✅ Your arrival has been recorded (№{number}).\nThe queue starts at {time}. "
-              "The order follows bot registration time — you are currently in position "
-              "{position}.",
+        "uz": "✅ Kelganingiz qayd etildi (№{number}).\nSotuv {time} da boshlanadi. Navbat "
+              "tartibi botdan ro'yxatdan o'tgan vaqt bo'yicha belgilanadi va sotuv "
+              "boshlanganda shu yerda yuboriladi.",
+        "ru": "✅ Ваша явка отмечена (№{number}).\nПродажа начнётся в {time}. Порядок — по "
+              "времени регистрации в боте; ваш номер в очереди придёт сюда, когда "
+              "продажа начнётся.",
+        "en": "✅ Your arrival has been recorded (№{number}).\nThe sale starts at {time}. "
+              "The order follows bot registration time — your place in the queue will be "
+              "sent here when the sale starts.",
     },
-    "ntf_checkin_queue": {
-        "uz": "✅ Kelganingiz qayd etildi (№{number}). Navbatingizni kuting — sizdan oldin "
-              "{ahead} kishi bor. Chaqirilganingizda xabar keladi.",
-        "ru": "✅ Ваша явка отмечена (№{number}). Ожидайте — перед вами {ahead} человек. "
-              "Когда вас вызовут, придёт сообщение.",
-        "en": "✅ Your arrival has been recorded (№{number}). Please wait — there are {ahead} "
-              "people ahead of you. You will get a message when you are called.",
+    "ntf_checkin_late_prequeue": {
+        "uz": "✅ Qayd etildi (№{number}). Siz kun oxiri (oxirgi) navbatga qo'shildingiz. "
+              "Sotuv {time} da boshlanadi — tartibingiz keyin xabar qilinadi.",
+        "ru": "✅ Отмечено (№{number}). Вы добавлены в очередь конца дня. Продажа начнётся "
+              "в {time} — ваш порядок сообщим позже.",
+        "en": "✅ Recorded (№{number}). You joined the end-of-day queue. The sale starts at "
+              "{time} — your place will be announced later.",
+    },
+    "ntf_sale_started": {
+        "uz": "🔥 Sotuv boshlandi!\nSizning kodingiz: №{number}\nBotda ro'yxatdan o'tgan "
+              "vaqtingiz: {reg_time}\nSizdan oldin {ahead} kishi bor. Chaqirilganingizda "
+              "xabar keladi.",
+        "ru": "🔥 Продажа началась!\nВаш код: №{number}\nВремя вашей регистрации в боте: "
+              "{reg_time}\nПеред вами {ahead} человек. Когда вас вызовут, придёт сообщение.",
+        "en": "🔥 The sale has started!\nYour code: №{number}\nYour bot registration time: "
+              "{reg_time}\nThere are {ahead} people ahead of you. You will get a message "
+              "when you are called.",
     },
     "ntf_checkin_late": {
         "uz": "✅ Qayd etildi (№{number}). Skanerlash vaqti tugagani uchun kun oxiri "

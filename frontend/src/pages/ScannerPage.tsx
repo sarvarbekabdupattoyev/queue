@@ -4,7 +4,8 @@ import { api, getToken, wsUrl } from '../api/client'
 import type { CheckinResponse, StaffState } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { StaffShell } from '../components/StaffShell'
-import { IconCamera, IconMapPin } from '../components/icons'
+import { WalkinModal } from '../components/WalkinModal'
+import { IconCamera, IconMapPin, IconPlus } from '../components/icons'
 import { formatLongCountdown, formatTime } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
@@ -38,6 +39,7 @@ export default function ScannerPage() {
   const [input, setInput] = useState('')
   const [last, setLast] = useState<ScanRecord | null>(null)
   const [history, setHistory] = useState<ScanRecord[]>([])
+  const [addingWalkin, setAddingWalkin] = useState(false)
   const [cameraOn, setCameraOn] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -147,7 +149,9 @@ export default function ScannerPage() {
     }
   }, [cameraOn, submit])
 
-  const checkinOpen = state ? state.event.phase !== 'closed' : true
+  const checkinOpen = state
+    ? state.event.phase !== 'closed' && state.event.phase !== 'ended'
+    : true
   const untilDeadline = state ? new Date(state.event.checkin_until).getTime() - now : 0
   const branchName = (id: number | null | undefined) =>
     id == null ? null : (state?.event.branches.find((b) => b.id === id)?.name ?? null)
@@ -226,6 +230,19 @@ export default function ScannerPage() {
                 )}
                 {cameraError && <div className="error-text">{cameraError}</div>}
               </div>
+              <div style={{ marginTop: 12 }}>
+                <button
+                  className="btn tonal full"
+                  disabled={!checkinOpen || !eventId}
+                  onClick={() => setAddingWalkin(true)}
+                >
+                  <IconPlus size={16} /> Mijoz qo‘shish (Telegramsiz)
+                </button>
+                <p className="hint" style={{ marginTop: 6 }}>
+                  Botsiz kelgan mijoz F.I.Sh. va telefon bilan qo‘shiladi — avtomatik navbat
+                  oxiriga tushadi va QR + kod oladi.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -290,6 +307,14 @@ export default function ScannerPage() {
               </div>
             )}
           </div>
+
+          {addingWalkin && eventId && (
+            <WalkinModal
+              eventId={eventId}
+              branches={state?.event.branches ?? []}
+              onClose={() => setAddingWalkin(false)}
+            />
+          )}
         </div>
       )}
     </StaffShell>

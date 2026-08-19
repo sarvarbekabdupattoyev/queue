@@ -10,7 +10,7 @@ from app.db.base import now_utc
 from app.db.session import SessionFactory
 from app.models import SaleEvent, Ticket
 from app.services import ticket_service
-from tests.conftest import auth, create_company, register_owner
+from tests.conftest import auth, create_company, event_times, register_owner, started_sale_times
 
 NOW = now_utc
 
@@ -25,14 +25,10 @@ async def setup_company(client, desks: int = 2):
     return token, desk_ids
 
 
-async def create_event(client, token, *, starts_delta_min=-60, checkin_delta_min=60):
+async def create_event(client, token, **time_offsets):
     response = await client.post(
         "/api/events",
-        json={
-            "name": "Sotuv kuni",
-            "starts_at": (NOW() + timedelta(minutes=starts_delta_min)).isoformat(),
-            "checkin_until": (NOW() + timedelta(minutes=checkin_delta_min)).isoformat(),
-        },
+        json={"name": "Sotuv kuni", **event_times(**time_offsets)},
         headers=auth(token),
     )
     assert response.status_code == 201, response.text
@@ -57,13 +53,9 @@ async def make_ticket(event_id: int, phone: str, registered_offset_sec: int) -> 
 
 
 async def close_checkin_window(client, token, event_id):
+    """Move every period into the past: the scan window is over, the sale runs."""
     response = await client.patch(
-        f"/api/events/{event_id}",
-        json={
-            "starts_at": (NOW() - timedelta(hours=3)).isoformat(),
-            "checkin_until": (NOW() - timedelta(seconds=1)).isoformat(),
-        },
-        headers=auth(token),
+        f"/api/events/{event_id}", json=started_sale_times(), headers=auth(token)
     )
     assert response.status_code == 200, response.text
 
@@ -259,8 +251,13 @@ async def test_public_display_and_ticket_endpoints(client):
 
     public_ticket = await client.get(f"/api/public/tickets/{ticket['code']}")
     assert public_ticket.status_code == 200
-    assert public_ticket.json()["position"] == 1
+    # queue order is announced only once the sale starts
+    assert public_ticket.json()["position"] is None
     assert public_ticket.json()["qr"].startswith("data:image/png;base64,")
+
+    await close_checkin_window(client, token, event["id"])
+    started = await client.get(f"/api/public/tickets/{ticket['code']}")
+    assert started.json()["position"] == 1
 
     missing = await client.get("/api/public/display/nope")
     assert missing.status_code == 404

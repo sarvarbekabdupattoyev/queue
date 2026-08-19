@@ -79,15 +79,18 @@ class Registration(StatesGroup):
     phone = State()
 
 
-def main_menu(lang: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=t(lang, "btn_ticket")), KeyboardButton(text=t(lang, "btn_status"))],
-            [KeyboardButton(text=t(lang, "btn_info")), KeyboardButton(text=t(lang, "btn_language"))],
-        ],
-        resize_keyboard=True,
-        is_persistent=True,
+def main_menu(lang: str, registered: bool = True) -> ReplyKeyboardMarkup:
+    """The ticket/status buttons only exist for chats that hold a ticket —
+    an unregistered user sees just the info and language buttons."""
+    rows: list[list[KeyboardButton]] = []
+    if registered:
+        rows.append(
+            [KeyboardButton(text=t(lang, "btn_ticket")), KeyboardButton(text=t(lang, "btn_status"))]
+        )
+    rows.append(
+        [KeyboardButton(text=t(lang, "btn_info")), KeyboardButton(text=t(lang, "btn_language"))]
     )
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
 def language_keyboard() -> InlineKeyboardMarkup:
@@ -195,6 +198,27 @@ async def _my_tickets(session: AsyncSession, company_id: int, chat_id: int) -> l
     return list((await session.scalars(stmt)).all())
 
 
+async def _is_registered(session: AsyncSession, company_id: int, chat_id: int) -> bool:
+    row = await session.scalar(
+        select(Ticket.id)
+        .join(SaleEvent, Ticket.event_id == SaleEvent.id)
+        .where(
+            SaleEvent.company_id == company_id,
+            SaleEvent.is_active.is_(True),
+            Ticket.telegram_chat_id == chat_id,
+            Ticket.status != TicketStatus.CANCELLED,
+        )
+        .limit(1)
+    )
+    return row is not None
+
+
+async def _menu_for(
+    session: AsyncSession, company_id: int, chat_id: int, lang: str
+) -> ReplyKeyboardMarkup:
+    return main_menu(lang, registered=await _is_registered(session, company_id, chat_id))
+
+
 async def _send_ticket(
     message: Message, session: AsyncSession, ticket: Ticket, lang: str, intro: str = ""
 ) -> None:
@@ -241,16 +265,16 @@ async def _status_text(session: AsyncSession, ticket: Ticket, lang: str) -> str:
         now_line = t(lang, "nobody_called")
 
     if ticket.status == TicketStatus.CHECKED_IN:
-        position = await queue_service.position_of(session, ticket)
         if event.queue_started():
+            position = await queue_service.position_of(session, ticket)
             mine = t(lang, "your_pos_queue", number=ticket.number, ahead=position - 1)
         else:
+            # the sale has not started — the final order is not announced yet
             mine = t(
                 lang,
                 "your_pos_prequeue",
                 number=ticket.number,
-                time=queue_service.fmt_local(event.checkin_until),
-                position=position,
+                time=queue_service.fmt_local(event.sale_starts_at),
             )
     elif ticket.status == TicketStatus.CALLED:
         mine = t(
@@ -352,8 +376,9 @@ async def change_language(callback: CallbackQuery, company_id: int) -> None:
         return
     async with SessionFactory() as session:
         await _save_lang(session, company_id, callback.message.chat.id, lang)
+        menu = await _menu_for(session, company_id, callback.message.chat.id, lang)
     await callback.answer()
-    await callback.message.answer(t(lang, "language_saved"), reply_markup=main_menu(lang))
+    await callback.message.answer(t(lang, "language_saved"), reply_markup=menu)
 
 
 async def _start_flow(
@@ -370,7 +395,9 @@ async def _start_flow(
             await _send_ticket(message, session, ticket, lang)
         return
     if not open_without_ticket:
-        await message.answer(t(lang, "no_open_events"), reply_markup=main_menu(lang))
+        await message.answer(
+            t(lang, "no_open_events"), reply_markup=main_menu(lang, registered=bool(tickets))
+        )
         return
     if len(open_without_ticket) == 1:
         event = open_without_ticket[0]
@@ -478,14 +505,16 @@ async def reg_full_name(message: Message, state: FSMContext) -> None:
     await message.answer(t(lang, "ask_phone"), reply_markup=phone_keyboard(lang))
 
 
-async def reg_phone_contact(message: Message, state: FSMContext, bot_db_id: int) -> None:
+async def reg_phone_contact(
+    message: Message, state: FSMContext, company_id: int, bot_db_id: int
+) -> None:
     lang = await _data_lang(state)
     contact = message.contact
     # only the sender's own contact counts — no forwarding someone else's
     if contact.user_id is None or contact.user_id != message.from_user.id:
         await message.answer(t(lang, "phone_not_yours"), reply_markup=phone_keyboard(lang))
         return
-    await _finish_registration(message, state, contact.phone_number, bot_db_id, lang)
+    await _finish_registration(message, state, contact.phone_number, company_id, bot_db_id, lang)
 
 
 async def reg_phone_text(message: Message, state: FSMContext) -> None:
@@ -499,7 +528,9 @@ async def cmd_ticket(message: Message, company_id: int) -> None:
         lang = await _menu_lang(session, company_id, message.chat.id)
         tickets = await _my_tickets(session, company_id, message.chat.id)
         if not tickets:
-            await message.answer(t(lang, "not_registered_yet"), reply_markup=main_menu(lang))
+            await message.answer(
+                t(lang, "not_registered_yet"), reply_markup=main_menu(lang, registered=False)
+            )
             return
         for ticket in tickets:
             await _send_ticket(message, session, ticket, lang)
@@ -510,7 +541,9 @@ async def cmd_status(message: Message, company_id: int) -> None:
         lang = await _menu_lang(session, company_id, message.chat.id)
         tickets = await _my_tickets(session, company_id, message.chat.id)
         if not tickets:
-            await message.answer(t(lang, "not_registered_yet"), reply_markup=main_menu(lang))
+            await message.answer(
+                t(lang, "not_registered_yet"), reply_markup=main_menu(lang, registered=False)
+            )
             return
         for ticket in tickets:
             await message.answer(
@@ -536,6 +569,7 @@ async def cmd_info(message: Message, company_id: int) -> None:
             )
         ).all()
         text = build_info_text(lang, company, events, list(branches))
+        menu = await _menu_for(session, company_id, message.chat.id, lang)
         logo_path = (
             get_settings().upload_dir / company.logo_path if company.logo_path else None
         )
@@ -547,13 +581,13 @@ async def cmd_info(message: Message, company_id: int) -> None:
         with suppress(Exception):
             if len(text) <= 1024:  # Telegram photo caption limit
                 await message.answer_photo(
-                    FSInputFile(logo_path), caption=text, reply_markup=main_menu(lang)
+                    FSInputFile(logo_path), caption=text, reply_markup=menu
                 )
             else:
                 await message.answer_photo(FSInputFile(logo_path))
-                await message.answer(text, reply_markup=main_menu(lang))
+                await message.answer(text, reply_markup=menu)
             return
-    await message.answer(text, reply_markup=main_menu(lang))
+    await message.answer(text, reply_markup=menu)
 
 
 async def cmd_language(message: Message) -> None:
@@ -571,12 +605,19 @@ async def fallback(message: Message, state: FSMContext, company_id: int) -> None
         return
     async with SessionFactory() as session:
         lang = await _menu_lang(session, company_id, message.chat.id)
-    await message.answer(t(lang, "start_over"), reply_markup=main_menu(lang))
+        menu = await _menu_for(session, company_id, message.chat.id, lang)
+    await message.answer(t(lang, "start_over"), reply_markup=menu)
 
 
 async def _finish_registration(
-    message: Message, state: FSMContext, raw_phone: str, bot_db_id: int, lang: str
+    message: Message,
+    state: FSMContext,
+    raw_phone: str,
+    company_id: int,
+    bot_db_id: int,
+    lang: str,
 ) -> None:
+    # only +998 Uzbek numbers pass normalize_phone — anything else is refused
     phone = normalize_phone(raw_phone)
     if phone is None:
         await message.answer(t(lang, "phone_invalid"), reply_markup=phone_keyboard(lang))
@@ -586,7 +627,8 @@ async def _finish_registration(
         event = await session.get(SaleEvent, data["event_id"])
         if event is None or not event.registration_open():
             await state.clear()
-            await message.answer(t(lang, "registration_closed"), reply_markup=main_menu(lang))
+            menu = await _menu_for(session, company_id, message.chat.id, lang)
+            await message.answer(t(lang, "registration_closed"), reply_markup=menu)
             return
         # one phone = one ticket per event: a duplicate gets the existing one
         existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
@@ -614,11 +656,16 @@ async def _finish_registration(
             )
         except DomainError as exc:
             await state.clear()
-            await message.answer(exc.message, reply_markup=main_menu(lang))
+            menu = await _menu_for(session, company_id, message.chat.id, lang)
+            await message.answer(exc.message, reply_markup=menu)
             return
         await state.clear()
         queue_service.schedule_event_broadcast(event.id)
-        await message.answer(t(lang, "registered_ok"), reply_markup=main_menu(lang))
+        # a registration after the on-time period still gets a QR, but the
+        # client is told up front they will join the end-of-day queue
+        late_born = ticket.registered_at > event.registration_until
+        ok_key = "registered_ok_late" if late_born else "registered_ok"
+        await message.answer(t(lang, ok_key), reply_markup=main_menu(lang))
         await _send_ticket(message, session, ticket, lang)
         log.info("New ticket #%s (%s) for event %s via bot", ticket.number, phone, event.id)
 

@@ -4,7 +4,8 @@ import { Link, useParams } from 'react-router-dom'
 import { api, getToken, wsUrl } from '../api/client'
 import type { SaleEvent, StaffState, Ticket, TicketStatus } from '../api/types'
 import { PageTitle } from '../components/DashboardLayout'
-import { IconMapPin, IconMonitor } from '../components/icons'
+import { WalkinModal } from '../components/WalkinModal'
+import { IconMapPin, IconMonitor, IconPlus } from '../components/icons'
 import { CopyButton, Spinner, useConfirm, useToast } from '../components/ui'
 import { formatDateTime, formatLongCountdown, prettyPhone } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
@@ -29,6 +30,7 @@ export default function EventDetailPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [branchFilter, setBranchFilter] = useState('')
+  const [addingWalkin, setAddingWalkin] = useState(false)
 
   const { data: event } = useQuery({
     queryKey: ['event', eventId],
@@ -71,6 +73,22 @@ export default function EventDetailPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tickets', eventId] }),
     onError: (e: Error) => toast(e.message, true),
   })
+  const saleAction = useMutation({
+    mutationFn: (action: 'hold' | 'resume' | 'end' | 'reopen') =>
+      api<SaleEvent>(`/events/${eventId}/sale`, { body: { action } }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['event', eventId], updated)
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] })
+      toast(
+        updated.phase === 'ended'
+          ? 'Sotuv yakunlandi'
+          : updated.sale_hold
+            ? 'Sotuv to‘xtatib turildi'
+            : 'Sotuv davom etmoqda',
+      )
+    },
+    onError: (e: Error) => toast(e.message, true),
+  })
 
   const displayLink = useMemo(
     () => (event ? `${window.location.origin}/display/${event.display_code}` : ''),
@@ -78,9 +96,10 @@ export default function EventDetailPage() {
   )
   if (!event) return <Spinner />
   const phase = PHASE_LABEL[event.phase]
-  const untilQueue = new Date(event.checkin_until).getTime() - now
+  const untilSale = new Date(event.sale_starts_at).getTime() - now
   const stats = state?.stats
   const hasBranches = event.branches.length > 0
+  const saleStarted = event.phase === 'queue' || event.phase === 'hold'
 
   return (
     <>
@@ -94,7 +113,9 @@ export default function EventDetailPage() {
           </span>
         ))}
         <span className="hint hide-sm">
-          {formatDateTime(event.starts_at)} — {formatDateTime(event.checkin_until)}
+          Ro‘yxat {formatDateTime(event.registration_until)} gacha · Skanerlash{' '}
+          {formatDateTime(event.starts_at)} — {formatDateTime(event.checkin_until)} · Sotuv{' '}
+          {formatDateTime(event.sale_starts_at)} dan
         </span>
         <span className={`conn-chip${connected ? ' on' : ''}`}>
           <span className="dot" /> {connected ? 'jonli' : 'ulanmoqda…'}
@@ -128,15 +149,78 @@ export default function EventDetailPage() {
         </span>
       </div>
 
-      {event.is_active && untilQueue > 0 && (
+      {event.is_active && event.sale_ended_at === null && untilSale > 0 && (
         <div className="card">
-          <div className="stat-label">Navbat boshlanishiga qoldi</div>
+          <div className="stat-label">Sotuv boshlanishiga qoldi</div>
           <div className="stat-value" style={{ fontSize: 34, color: 'var(--amber)' }}>
-            {formatLongCountdown(untilQueue)}
+            {formatLongCountdown(untilSale)}
           </div>
           <p className="hint" style={{ marginTop: 6 }}>
-            Skanerlash tugagach chaqiruv ochiladi — tartib botdan ro‘yxatdan o‘tish vaqti bo‘yicha.
+            Sotuv boshlanganda chaqiruv ochiladi va har bir mijozga navbat tartibi botda
+            yuboriladi — tartib botdan ro‘yxatdan o‘tish vaqti bo‘yicha.
           </p>
+        </div>
+      )}
+
+      {event.is_active && (saleStarted || event.phase === 'ended') && (
+        <div className="card">
+          <div className="card-title">
+            Sotuvni boshqarish
+            <span className="aux">
+              {event.phase === 'hold'
+                ? 'To‘xtatib turilgan — chaqiruv yopiq, skanerlash davom etadi'
+                : event.phase === 'ended'
+                  ? 'Yakunlangan'
+                  : 'Navbat tugagach sotuv o‘zi yakunlanadi'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {event.phase === 'queue' && (
+              <button
+                className="btn tonal"
+                disabled={saleAction.isPending}
+                onClick={() => saleAction.mutate('hold')}
+              >
+                To‘xtatib turish
+              </button>
+            )}
+            {event.phase === 'hold' && (
+              <button
+                className="btn"
+                disabled={saleAction.isPending}
+                onClick={() => saleAction.mutate('resume')}
+              >
+                Davom ettirish
+              </button>
+            )}
+            {event.phase !== 'ended' ? (
+              <button
+                className="btn danger-ghost"
+                disabled={saleAction.isPending}
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: 'Sotuv yakunlansinmi?',
+                      description:
+                        'Chaqiruv va skanerlash to‘xtaydi. Kerak bo‘lsa keyin qayta ochish mumkin.',
+                      confirmLabel: 'Yakunlash',
+                    })
+                  )
+                    saleAction.mutate('end')
+                }}
+              >
+                Sotuvni yakunlash
+              </button>
+            ) : (
+              <button
+                className="btn"
+                disabled={saleAction.isPending}
+                onClick={() => saleAction.mutate('reopen')}
+              >
+                Sotuvni qayta ochish
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -162,6 +246,14 @@ export default function EventDetailPage() {
           <div className="stat">
             <b>{stats?.skipped ?? '—'}</b>
             <span>Kelmadi</span>
+          </div>
+          <div className="stat">
+            <b>{stats?.late ?? '—'}</b>
+            <span>Kech kelgan</span>
+          </div>
+          <div className="stat">
+            <b>{stats?.staff_added ?? '—'}</b>
+            <span>Xodim qo‘shgan</span>
           </div>
         </div>
         {hasBranches && !!state?.by_branch?.length && (
@@ -197,7 +289,14 @@ export default function EventDetailPage() {
       <div className="card">
         <div className="card-title">
           Mijozlar ro‘yxati
-          <span className="aux">
+          <span className="aux" style={{ display: 'inline-flex', gap: 8 }}>
+            <button
+              className="btn sm"
+              onClick={() => setAddingWalkin(true)}
+              disabled={event.phase === 'ended' || !event.is_active}
+            >
+              <IconPlus size={14} /> Mijoz qo‘shish
+            </button>
             <button className="btn ghost sm" onClick={() => seed.mutate()} disabled={seed.isPending}>
               +10 sinov mijozi
             </button>
@@ -270,6 +369,7 @@ export default function EventDetailPage() {
                           {ticket.first_name} {ticket.last_name}
                         </span>{' '}
                         {ticket.source === 'seed' && <span className="badge dim">sinov</span>}
+                        {ticket.source === 'staff' && <span className="badge blue">xodim qo‘shgan</span>}
                       </td>
                       {hasBranches && <td className="muted">{ticket.branch_name ?? '—'}</td>}
                       <td className="muted">{prettyPhone(ticket.phone)}</td>
@@ -312,6 +412,15 @@ export default function EventDetailPage() {
           </div>
         )}
       </div>
+
+      {addingWalkin && (
+        <WalkinModal
+          eventId={Number(eventId)}
+          branches={event.branches}
+          onClose={() => setAddingWalkin(false)}
+          onAdded={() => queryClient.invalidateQueries({ queryKey: ['tickets', eventId] })}
+        />
+      )}
     </>
   )
 }
