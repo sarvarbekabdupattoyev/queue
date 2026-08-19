@@ -1,0 +1,106 @@
+# SmartNavbat — production override for a single dedicated node
+# (8 vCPU / 32 GB RAM / 64 GB NVMe; see docs/PRODUCTION_SERVER_SETUP.md).
+#
+# Usage (always both files, base first):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# CPU limits deliberately over-commit (they sum to more than the box): they
+# are CEILINGS that stop one component starving the others, not reservations.
+
+name: smartnavbat
+
+services:
+  postgres:
+    # Tuned for the 12 GB budget below. The working set of this schema stays
+    # in the low gigabytes for years, so the whole dataset lives in memory;
+    # jit=off because pure-OLTP micro-queries lose more to JIT warm-up than
+    # they gain; wal caps keep the small NVMe from filling with WAL.
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=6GB
+      -c effective_cache_size=12GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=512MB
+      -c wal_buffers=64MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c checkpoint_completion_target=0.9
+      -c wal_compression=lz4
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c jit=off
+      -c shared_preload_libraries=pg_stat_statements
+      -c log_min_duration_statement=250
+    shm_size: 1gb
+    deploy:
+      resources:
+        limits: { cpus: "4", memory: 12g }
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
+
+  redis:
+    # Redis carries FSM registration state and cross-process channels.
+    # noeviction: under memory pressure fail loudly instead of silently
+    # dropping half-finished registrations (2 GB is >100x the realistic
+    # need). AOF everysec bounds loss on power cut to <=1 s.
+    command: >
+      redis-server
+      --maxmemory 2gb
+      --maxmemory-policy noeviction
+      --appendonly yes
+      --appendfsync everysec
+      --save ""
+      --tcp-backlog 4096
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 2560m }
+
+  api:
+    deploy:
+      resources:
+        limits: { cpus: "4", memory: 3g }
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  bot:
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 1536m }
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/healthz', timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    # The ONLY service publishing ports — that is what keeps UFW meaningful
+    # (Docker's published ports bypass the host firewall).
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 256m }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+[Unit]
+Description=Set Transparent Huge Pages to madvise (Redis/PostgreSQL latency)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/enabled'
+
+[Install]
+WantedBy=multi-user.target

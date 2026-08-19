@@ -1,0 +1,17 @@
+# SmartNavbat backups + disk hygiene (install to /etc/cron.d/smartnavbat).
+# Compose project name is fixed to "smartnavbat" (docker-compose.prod.yml),
+# so volume names are stable whatever directory the repo is cloned into.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 02:00 — nightly compressed dump, keep 7 days
+0 2 * * * root docker compose -f /opt/smartnavbat/docker-compose.yml -f /opt/smartnavbat/docker-compose.prod.yml exec -T postgres pg_dump -U navbat -Fc navbat > /opt/backups/db-$(date +\%F).dump 2>>/var/log/pg_backup.log && find /opt/backups -maxdepth 1 -name 'db-*.dump' -mtime +7 -delete
+
+# 02:20 — nightly archive of uploaded logos, keep 7 days
+20 2 * * * root docker run --rm -v smartnavbat_navbat-uploads:/data:ro -v /opt/backups:/backup alpine tar czf /backup/uploads-$(date +\%F).tgz -C /data . && find /opt/backups -maxdepth 1 -name 'uploads-*.tgz' -mtime +7 -delete
+
+# Sunday 02:30 — promote the day's dump to the weekly set, keep 4 weeks
+30 2 * * 0 root cp /opt/backups/db-$(date +\%F).dump /opt/backups/weekly/ 2>/dev/null; find /opt/backups/weekly -mtime +28 -delete
+
+# Sunday 03:00 — prune Docker images/layers older than a week (64 GB disk)
+0 3 * * 0 root docker system prune -af --filter "until=168h" >/dev/null 2>&1
