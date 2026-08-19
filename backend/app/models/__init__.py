@@ -1,3 +1,4 @@
+from app.models.bot_user import BotUser
 from app.models.branch import Branch, event_branches
 from app.models.company import (
     MAX_BOTS_PER_COMPANY,
@@ -13,6 +14,7 @@ from app.models.ticket import LATE_ORDER_BASE, Ticket
 from app.models.user import User
 
 __all__ = [
+    "BotUser",
     "Branch",
     "Company",
     "CompanyBot",

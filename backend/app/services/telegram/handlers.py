@@ -1,8 +1,13 @@
 """Telegram bot conversation, shared by every company bot.
 
-/start → (choose event if several are open) → (choose branch if the event
-runs in several) → first name → last name → phone (contact button or typed)
+/start → choose language (first time; inline buttons uz/ru/en) → (choose
+event if several are open) → (choose branch if the event runs in several) →
+F.I.Sh. in one line → phone via the contact button ONLY (typed numbers are
+rejected; one phone = one ticket, duplicates get their existing ticket back)
 → ticket with a random 4-digit number + QR photo.
+
+The persistent menu always carries the company-info button (name, logo,
+locations, upcoming sale dates, contact phones) and a language switcher.
 
 Handlers are module-level functions; the owning company and the bot's DB row
 are injected by the dispatcher (``Dispatcher(company_id=..., bot_db_id=...)``
@@ -12,6 +17,7 @@ share one code path, one FSM storage (keys are bot-scoped) and no closures.
 
 import logging
 import re
+from contextlib import suppress
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -20,6 +26,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -28,52 +35,138 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.phone import normalize_phone, pretty_phone
 from app.db.base import now_utc
 from app.db.session import SessionFactory
-from app.models import Branch, SaleEvent, Ticket, TicketStatus
+from app.models import Branch, BotUser, Company, SaleEvent, Ticket, TicketStatus
 from app.services import queue_service, ticket_service
 from app.services.errors import DomainError
+from app.services.i18n import (
+    LANGS,
+    LANGUAGE_NAMES,
+    LANGUAGE_PROMPT,
+    norm_lang,
+    status_label,
+    t,
+)
 from app.services.qr_service import qr_png_bytes_async
 
 log = logging.getLogger(__name__)
 
-NAME_RE = re.compile(r"^[A-Za-zА-Яа-яЎўҚқҒғҲҳXxOoʻʼ'’‘\- ]{2,30}$")
+NAME_WORD_RE = re.compile(r"^[A-Za-zА-Яа-яЎўҚқҒғҲҳXxOoʻʼ'’‘\-]{2,30}$")
 
-BTN_MY_TICKET = "🎫 Mening navbatim"
-BTN_STATUS = "📊 Navbat holati"
+# logo formats Telegram accepts as a photo (SVG is skipped)
+PHOTO_LOGO_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
-MAIN_MENU = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text=BTN_MY_TICKET), KeyboardButton(text=BTN_STATUS)]],
-    resize_keyboard=True,
-    is_persistent=True,
-)
-
-STATUS_UZ = {
-    TicketStatus.REGISTERED: "Ro'yxatdan o'tgan (hali kelmagan)",
-    TicketStatus.CHECKED_IN: "Keldi — navbat kutmoqda",
-    TicketStatus.CALLED: "Chaqirildi",
-    TicketStatus.SERVING: "Xizmat ko'rsatilmoqda",
-    TicketStatus.DONE: "Yakunlandi",
-    TicketStatus.SKIPPED: "O'tkazib yuborilgan (kelmadi)",
-    TicketStatus.CANCELLED: "Bekor qilingan",
-}
+# menu buttons match in every language (the keyboard keeps the labels of the
+# language it was sent with, even after the user switches)
+BTN_TICKET_ALL = {t(lang, "btn_ticket") for lang in LANGS}
+BTN_STATUS_ALL = {t(lang, "btn_status") for lang in LANGS}
+BTN_INFO_ALL = {t(lang, "btn_info") for lang in LANGS}
+BTN_LANG_ALL = {t(lang, "btn_language") for lang in LANGS}
 
 
 class Registration(StatesGroup):
+    choosing_language = State()
     choosing_event = State()
     choosing_branch = State()
-    first_name = State()
-    last_name = State()
+    full_name = State()
     phone = State()
+
+
+def main_menu(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=t(lang, "btn_ticket")), KeyboardButton(text=t(lang, "btn_status"))],
+            [KeyboardButton(text=t(lang, "btn_info")), KeyboardButton(text=t(lang, "btn_language"))],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def language_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=LANGUAGE_NAMES[lang], callback_data=f"lang:{lang}")
+                for lang in LANGS
+            ]
+        ]
+    )
+
+
+def phone_keyboard(lang: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=t(lang, "btn_share_phone"), request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def split_full_name(text: str) -> tuple[str, str] | None:
+    """One-line F.I.Sh. → (first_name, rest). 2–5 letter-only words; the
+    first word is the given name, the rest (surname + patronymic) is stored
+    as the last name."""
+    words = text.strip().split()
+    if not 2 <= len(words) <= 5:
+        return None
+    if any(not NAME_WORD_RE.fullmatch(word) for word in words):
+        return None
+    first = _cap(words[0])
+    rest = " ".join(_cap(word) for word in words[1:])
+    if len(first) > 64 or len(rest) > 64:
+        return None
+    return first, rest
 
 
 def _cap(value: str) -> str:
     value = value.strip()
     return value[:1].upper() + value[1:] if value else value
 
+
+# --------------------------------------------------------------- language ---
+
+async def _stored_lang(session: AsyncSession, company_id: int, chat_id: int) -> str | None:
+    return await session.scalar(
+        select(BotUser.language).where(
+            BotUser.company_id == company_id, BotUser.chat_id == chat_id
+        )
+    )
+
+
+async def _save_lang(session: AsyncSession, company_id: int, chat_id: int, lang: str) -> None:
+    row = await session.scalar(
+        select(BotUser).where(BotUser.company_id == company_id, BotUser.chat_id == chat_id)
+    )
+    if row is not None:
+        row.language = lang
+        await session.commit()
+        return
+    session.add(BotUser(company_id=company_id, chat_id=chat_id, language=lang))
+    try:
+        await session.commit()
+    except IntegrityError:
+        # two parallel /starts raced on the unique (company, chat) row
+        await session.rollback()
+        row = await session.scalar(
+            select(BotUser).where(BotUser.company_id == company_id, BotUser.chat_id == chat_id)
+        )
+        if row is not None:
+            row.language = lang
+            await session.commit()
+
+
+async def _menu_lang(session: AsyncSession, company_id: int, chat_id: int) -> str:
+    return norm_lang(await _stored_lang(session, company_id, chat_id))
+
+
+# ---------------------------------------------------------------- queries ---
 
 async def _open_events(session: AsyncSession, company_id: int) -> list[SaleEvent]:
     events = (
@@ -103,30 +196,32 @@ async def _my_tickets(session: AsyncSession, company_id: int, chat_id: int) -> l
 
 
 async def _send_ticket(
-    message: Message, session: AsyncSession, ticket: Ticket, intro: str = ""
+    message: Message, session: AsyncSession, ticket: Ticket, lang: str, intro: str = ""
 ) -> None:
     event = await session.get(SaleEvent, ticket.event_id)
     branch = await session.get(Branch, ticket.branch_id) if ticket.branch_id else None
-    branch_line = f"📍 Filial: {branch.name}\n" if branch else ""
-    caption = (
-        f"{intro}🎫 Navbat raqamingiz: №{ticket.number}\n"
-        f"🗓 {event.name} — {queue_service.fmt_local(event.starts_at)}\n"
-        f"{branch_line}"
-        f"👤 {ticket.full_name}\n"
-        f"📞 {pretty_phone(ticket.phone)}\n\n"
-        f"Ofisga kelganda shu QR-kodni qabulxonada ko'rsating — kelganingiz qayd etiladi. "
-        f"Skanerlash {queue_service.fmt_local(event.checkin_until)} gacha. Navbat tartibi "
-        f"ro'yxatdan o'tgan vaqtingiz bo'yicha belgilanadi.\n\n"
-        f"Holat: {STATUS_UZ[ticket.status]}"
+    branch_line = t(lang, "branch_line", branch=branch.name) + "\n" if branch else ""
+    caption = t(
+        lang,
+        "ticket_caption",
+        intro=intro,
+        number=ticket.number,
+        event=event.name,
+        starts=queue_service.fmt_local(event.starts_at),
+        branch_line=branch_line,
+        name=ticket.full_name,
+        phone=pretty_phone(ticket.phone),
+        deadline=queue_service.fmt_local(event.checkin_until),
+        status=status_label(lang, ticket.status),
     )
     # PIL work happens in a worker thread — a burst of registrations must not
     # serialize on QR rendering in the event loop.
     png = await qr_png_bytes_async(ticket.code)
     photo = BufferedInputFile(png, filename=f"navbat-{ticket.number}.png")
-    await message.answer_photo(photo=photo, caption=caption, reply_markup=MAIN_MENU)
+    await message.answer_photo(photo=photo, caption=caption, reply_markup=main_menu(lang))
 
 
-async def _status_text(session: AsyncSession, ticket: Ticket) -> str:
+async def _status_text(session: AsyncSession, ticket: Ticket, lang: str) -> str:
     event = await session.get(SaleEvent, ticket.event_id)
     # branch tickets see only their own branch's queue
     active = await queue_service.active_tickets(session, event.id, ticket.branch_id)
@@ -134,41 +229,175 @@ async def _status_text(session: AsyncSession, ticket: Ticket) -> str:
     desk_numbers = await queue_service.desk_numbers_for(session, active)
     if active:
         serving = ", ".join(
-            f"№{t.number} ({desk_numbers.get(t.desk_id, '?')}-stol)" for t in active[:3]
+            f"№{a.number} ({t(lang, 'desk_short', desk=desk_numbers.get(a.desk_id, '?'))})"
+            for a in active[:3]
         )
-        now_line = f"Hozir {serving} qabul qilinmoqda."
+        now_line = t(lang, "now_serving", list=serving)
     else:
-        now_line = "Hozircha hech kim chaqirilmagan."
+        now_line = t(lang, "nobody_called")
 
     if ticket.status == TicketStatus.CHECKED_IN:
         position = await queue_service.position_of(session, ticket)
         if event.queue_started():
-            mine = f"Sizning raqamingiz: №{ticket.number}. Sizdan oldin {position - 1} kishi bor."
+            mine = t(lang, "your_pos_queue", number=ticket.number, ahead=position - 1)
         else:
-            mine = (
-                f"Sizning raqamingiz: №{ticket.number}. Navbat "
-                f"{queue_service.fmt_local(event.checkin_until)} da boshlanadi — hozircha "
-                f"{position}-o'rindasiz."
+            mine = t(
+                lang,
+                "your_pos_prequeue",
+                number=ticket.number,
+                time=queue_service.fmt_local(event.checkin_until),
+                position=position,
             )
     elif ticket.status == TicketStatus.CALLED:
-        desk = desk_numbers.get(ticket.desk_id, "?")
-        mine = f"Sizning raqamingiz: №{ticket.number} — chaqirilgansiz! {desk}-stolga yaqinlashing."
+        mine = t(
+            lang, "your_called", number=ticket.number, desk=desk_numbers.get(ticket.desk_id, "?")
+        )
     elif ticket.status == TicketStatus.REGISTERED:
-        mine = (
-            f"Sizning raqamingiz: №{ticket.number}. Ofisga kelganda QR-kodni qabulxonada "
-            f"ko'rsating ({queue_service.fmt_local(event.checkin_until)} gacha)."
+        mine = t(
+            lang,
+            "your_registered",
+            number=ticket.number,
+            deadline=queue_service.fmt_local(event.checkin_until),
         )
     else:
-        mine = f"Sizning raqamingiz: №{ticket.number}. Holat: {STATUS_UZ[ticket.status]}."
-    return f"📊 {now_line} Kutayotganlar: {waiting_total} kishi.\n\n{mine}"
+        mine = t(
+            lang, "your_status", number=ticket.number, status=status_label(lang, ticket.status)
+        )
+    return t(lang, "status_summary", now_line=now_line, waiting=waiting_total, mine=mine)
+
+
+def build_info_text(
+    lang: str,
+    company: Company,
+    events: list[SaleEvent],
+    branches: list[Branch],
+) -> str:
+    """Company card for the ℹ️ button: name, upcoming sale dates, locations
+    (company locations, or branch addresses as fallback) and phones."""
+    blocks: list[str] = [f"🏢 {company.name}"]
+    if events:
+        lines = [
+            t(
+                lang,
+                "info_event_line",
+                name=e.name,
+                starts=queue_service.fmt_local(e.starts_at),
+                deadline=queue_service.fmt_local(e.checkin_until),
+            )
+            for e in events
+        ]
+        blocks.append(t(lang, "info_events_header") + ":\n" + "\n".join(lines))
+    location_lines = [
+        "• " + ", ".join(part for part in (loc.name, loc.address) if part)
+        + (f" ({t(lang, 'info_map_link')}: {loc.map_url})" if loc.map_url else "")
+        for loc in company.locations
+    ]
+    if not location_lines:
+        location_lines = [
+            "• " + ", ".join(part for part in (b.name, b.address) if part)
+            for b in branches
+            if b.address
+        ]
+    if location_lines:
+        blocks.append(t(lang, "info_locations_header") + ":\n" + "\n".join(location_lines))
+    if company.phones:
+        phone_lines = [
+            f"• {pretty_phone(p.phone)}" + (f" — {p.label}" if p.label else "")
+            for p in company.phones
+        ]
+        blocks.append(t(lang, "info_phones_header") + ":\n" + "\n".join(phone_lines))
+    if len(blocks) == 1:
+        blocks.append(t(lang, "info_no_details"))
+    return "\n\n".join(blocks)
 
 
 # ----------------------------------------------------------------- handlers ---
 
-async def _ask_branch_or_name(message: Message, state: FSMContext, event: SaleEvent) -> None:
+async def cmd_start(message: Message, state: FSMContext, company_id: int) -> None:
+    await state.clear()
+    async with SessionFactory() as session:
+        lang = await _stored_lang(session, company_id, message.chat.id)
+        if lang is None:
+            await state.set_state(Registration.choosing_language)
+            await message.answer(LANGUAGE_PROMPT, reply_markup=language_keyboard())
+            return
+        await _start_flow(message, state, session, company_id, norm_lang(lang))
+
+
+async def choose_language_start(
+    callback: CallbackQuery, state: FSMContext, company_id: int
+) -> None:
+    """Language picked during /start — save it and continue registration."""
+    lang = callback.data.split(":", 1)[1]
+    if lang not in LANGS:
+        await callback.answer()
+        return
+    async with SessionFactory() as session:
+        await _save_lang(session, company_id, callback.message.chat.id, lang)
+        await callback.answer()
+        await state.clear()
+        await callback.message.answer(t(lang, "language_saved"))
+        await _start_flow(callback.message, state, session, company_id, lang)
+
+
+async def change_language(callback: CallbackQuery, company_id: int) -> None:
+    """Language switched from the menu (outside the registration flow)."""
+    lang = callback.data.split(":", 1)[1]
+    if lang not in LANGS:
+        await callback.answer()
+        return
+    async with SessionFactory() as session:
+        await _save_lang(session, company_id, callback.message.chat.id, lang)
+    await callback.answer()
+    await callback.message.answer(t(lang, "language_saved"), reply_markup=main_menu(lang))
+
+
+async def _start_flow(
+    message: Message, state: FSMContext, session: AsyncSession, company_id: int, lang: str
+) -> None:
+    events = await _open_events(session, company_id)
+    tickets = await _my_tickets(session, company_id, message.chat.id)
+    ticket_event_ids = {ticket.event_id for ticket in tickets}
+    open_without_ticket = [e for e in events if e.id not in ticket_event_ids]
+
+    if tickets and not open_without_ticket:
+        await message.answer(t(lang, "already_have_tickets"))
+        for ticket in tickets:
+            await _send_ticket(message, session, ticket, lang)
+        return
+    if not open_without_ticket:
+        await message.answer(t(lang, "no_open_events"), reply_markup=main_menu(lang))
+        return
+    if len(open_without_ticket) == 1:
+        event = open_without_ticket[0]
+        await message.answer(
+            t(lang, "welcome_single_event", event=event.name),
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await _ask_branch_or_name(message, state, event, lang)
+        return
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{e.name} — {queue_service.fmt_local(e.starts_at)}",
+                    callback_data=f"ev:{e.id}",
+                )
+            ]
+            for e in open_without_ticket
+        ]
+    )
+    await state.set_state(Registration.choosing_event)
+    await state.update_data(lang=lang)
+    await message.answer(t(lang, "choose_event"), reply_markup=keyboard)
+
+
+async def _ask_branch_or_name(
+    message: Message, state: FSMContext, event: SaleEvent, lang: str
+) -> None:
     """After the event is chosen: pick a branch (when the event runs in
-    several), then move on to the name step. The queue is branch-scoped, so
-    the client queues at the branch they will actually visit."""
+    several), then move on to the one-line F.I.Sh. step. The queue is
+    branch-scoped, so the client queues at the branch they will visit."""
     branches = list(event.branches)
     if len(branches) > 1:
         keyboard = InlineKeyboardMarkup(
@@ -183,80 +412,36 @@ async def _ask_branch_or_name(message: Message, state: FSMContext, event: SaleEv
             ]
         )
         await state.set_state(Registration.choosing_branch)
-        await state.update_data(event_id=event.id)
-        await message.answer(
-            "Tadbir bir nechta filialda o'tkaziladi. Qaysi filialga borasiz? "
-            "Navbatingiz shu filialda amal qiladi.",
-            reply_markup=keyboard,
-        )
+        await state.update_data(event_id=event.id, lang=lang)
+        await message.answer(t(lang, "choose_branch"), reply_markup=keyboard)
         return
     branch = branches[0] if branches else None
-    await state.set_state(Registration.first_name)
-    await state.update_data(event_id=event.id, branch_id=branch.id if branch else None)
-    prefix = f"📍 Filial: {branch.name}\n\n" if branch else ""
-    await message.answer(f"{prefix}1/3 — Ismingizni yozing:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(Registration.full_name)
+    await state.update_data(event_id=event.id, branch_id=branch.id if branch else None, lang=lang)
+    prefix = t(lang, "branch_line", branch=branch.name) + "\n\n" if branch else ""
+    await message.answer(prefix + t(lang, "ask_fio"), reply_markup=ReplyKeyboardRemove())
 
 
-async def cmd_start(message: Message, state: FSMContext, company_id: int) -> None:
-    await state.clear()
-    async with SessionFactory() as session:
-        events = await _open_events(session, company_id)
-        tickets = await _my_tickets(session, company_id, message.chat.id)
-        ticket_event_ids = {t.event_id for t in tickets}
-        open_without_ticket = [e for e in events if e.id not in ticket_event_ids]
-
-        if tickets and not open_without_ticket:
-            await message.answer("Siz allaqachon ro'yxatdan o'tgansiz. Mana navbatingiz:")
-            for ticket in tickets:
-                await _send_ticket(message, session, ticket)
-            return
-        if not open_without_ticket:
-            await message.answer(
-                "Hozircha ochiq tadbirlar yo'q. Tadbir e'lon qilinganda qayta urinib ko'ring.",
-                reply_markup=MAIN_MENU,
-            )
-            return
-        if len(open_without_ticket) == 1:
-            event = open_without_ticket[0]
-            await message.answer(
-                f"Assalomu alaykum! «{event.name}» uchun onlayn navbat botiga xush kelibsiz.\n\n"
-                "Ro'yxatdan o'tish uchun 3 ta ma'lumot kerak: ism, familiya va telefon raqam. "
-                "Bitta telefonga bitta navbat beriladi.",
-                reply_markup=ReplyKeyboardRemove(),
-            )
-            await _ask_branch_or_name(message, state, event)
-            return
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text=f"{e.name} — {queue_service.fmt_local(e.starts_at)}",
-                        callback_data=f"ev:{e.id}",
-                    )
-                ]
-                for e in open_without_ticket
-            ]
-        )
-        await state.set_state(Registration.choosing_event)
-        await message.answer(
-            "Assalomu alaykum! Qaysi tadbir uchun navbat olasiz?", reply_markup=keyboard
-        )
+async def _data_lang(state: FSMContext) -> str:
+    return norm_lang((await state.get_data()).get("lang"))
 
 
 async def choose_event(callback: CallbackQuery, state: FSMContext, company_id: int) -> None:
     event_id = int(callback.data.split(":", 1)[1])
+    lang = await _data_lang(state)
     async with SessionFactory() as session:
         event = await session.get(SaleEvent, event_id)
         if event is None or event.company_id != company_id or not event.registration_open():
-            await callback.answer("Bu tadbir uchun ro'yxat yopilgan", show_alert=True)
+            await callback.answer(t(lang, "event_closed_alert"), show_alert=True)
             return
         await callback.answer()
-        await _ask_branch_or_name(callback.message, state, event)
+        await _ask_branch_or_name(callback.message, state, event, lang)
 
 
 async def choose_branch(callback: CallbackQuery, state: FSMContext, company_id: int) -> None:
     branch_id = int(callback.data.split(":", 1)[1])
     data = await state.get_data()
+    lang = norm_lang(data.get("lang"))
     async with SessionFactory() as session:
         event = await session.get(SaleEvent, data.get("event_id", 0))
         if (
@@ -265,109 +450,141 @@ async def choose_branch(callback: CallbackQuery, state: FSMContext, company_id: 
             or not event.registration_open()
             or branch_id not in event.branch_ids()
         ):
-            await callback.answer("Bu filial uchun ro'yxatdan o'tib bo'lmaydi", show_alert=True)
+            await callback.answer(t(lang, "branch_closed_alert"), show_alert=True)
             return
         branch_name = next(b.name for b in event.branches if b.id == branch_id)
     await callback.answer()
-    await state.set_state(Registration.first_name)
+    await state.set_state(Registration.full_name)
     await state.update_data(branch_id=branch_id)
     await callback.message.answer(
-        f"📍 Filial: {branch_name}\n\n1/3 — Ismingizni yozing:",
+        t(lang, "branch_line", branch=branch_name) + "\n\n" + t(lang, "ask_fio"),
         reply_markup=ReplyKeyboardRemove(),
     )
 
 
+async def reg_full_name(message: Message, state: FSMContext) -> None:
+    lang = await _data_lang(state)
+    parsed = split_full_name(message.text or "")
+    if parsed is None:
+        await message.answer(t(lang, "fio_invalid"))
+        return
+    first_name, last_name = parsed
+    await state.update_data(first_name=first_name, last_name=last_name)
+    await state.set_state(Registration.phone)
+    await message.answer(t(lang, "ask_phone"), reply_markup=phone_keyboard(lang))
+
+
+async def reg_phone_contact(message: Message, state: FSMContext, bot_db_id: int) -> None:
+    lang = await _data_lang(state)
+    contact = message.contact
+    # only the sender's own contact counts — no forwarding someone else's
+    if contact.user_id is None or contact.user_id != message.from_user.id:
+        await message.answer(t(lang, "phone_not_yours"), reply_markup=phone_keyboard(lang))
+        return
+    await _finish_registration(message, state, contact.phone_number, bot_db_id, lang)
+
+
+async def reg_phone_text(message: Message, state: FSMContext) -> None:
+    """Typed phone numbers are rejected — the contact button is the only way."""
+    lang = await _data_lang(state)
+    await message.answer(t(lang, "phone_only_button"), reply_markup=phone_keyboard(lang))
+
+
 async def cmd_ticket(message: Message, company_id: int) -> None:
     async with SessionFactory() as session:
+        lang = await _menu_lang(session, company_id, message.chat.id)
         tickets = await _my_tickets(session, company_id, message.chat.id)
         if not tickets:
-            await message.answer("Siz hali ro'yxatdan o'tmagansiz. /start ni bosing.")
+            await message.answer(t(lang, "not_registered_yet"), reply_markup=main_menu(lang))
             return
         for ticket in tickets:
-            await _send_ticket(message, session, ticket)
+            await _send_ticket(message, session, ticket, lang)
 
 
 async def cmd_status(message: Message, company_id: int) -> None:
     async with SessionFactory() as session:
+        lang = await _menu_lang(session, company_id, message.chat.id)
         tickets = await _my_tickets(session, company_id, message.chat.id)
         if not tickets:
-            await message.answer("Siz hali ro'yxatdan o'tmagansiz. /start ni bosing.")
+            await message.answer(t(lang, "not_registered_yet"), reply_markup=main_menu(lang))
             return
         for ticket in tickets:
-            await message.answer(await _status_text(session, ticket), reply_markup=MAIN_MENU)
+            await message.answer(
+                await _status_text(session, ticket, lang), reply_markup=main_menu(lang)
+            )
 
 
-async def cmd_help(message: Message) -> None:
-    await message.answer(
-        "/start — ro'yxatdan o'tish\n/navbat — mening navbatim (QR-kod)\n/holat — navbat holati"
-    )
+async def cmd_info(message: Message, company_id: int) -> None:
+    """Company card — always one tap away via the ℹ️ menu button or /info."""
+    async with SessionFactory() as session:
+        lang = await _menu_lang(session, company_id, message.chat.id)
+        company = await session.scalar(
+            select(Company)
+            .where(Company.id == company_id)
+            .options(selectinload(Company.phones), selectinload(Company.locations))
+        )
+        if company is None:
+            return
+        events = await _open_events(session, company_id)
+        branches = (
+            await session.scalars(
+                select(Branch).where(Branch.company_id == company_id).order_by(Branch.id)
+            )
+        ).all()
+        text = build_info_text(lang, company, events, list(branches))
+        logo_path = (
+            get_settings().upload_dir / company.logo_path if company.logo_path else None
+        )
+    if (
+        logo_path is not None
+        and logo_path.suffix.lower() in PHOTO_LOGO_SUFFIXES
+        and logo_path.is_file()
+    ):
+        with suppress(Exception):
+            if len(text) <= 1024:  # Telegram photo caption limit
+                await message.answer_photo(
+                    FSInputFile(logo_path), caption=text, reply_markup=main_menu(lang)
+                )
+            else:
+                await message.answer_photo(FSInputFile(logo_path))
+                await message.answer(text, reply_markup=main_menu(lang))
+            return
+    await message.answer(text, reply_markup=main_menu(lang))
 
 
-async def reg_first_name(message: Message, state: FSMContext) -> None:
-    text = message.text.strip()
-    if not NAME_RE.fullmatch(text):
-        await message.answer("Iltimos, faqat harflardan iborat ism yozing (2–30 belgi).")
+async def cmd_language(message: Message) -> None:
+    await message.answer(LANGUAGE_PROMPT, reply_markup=language_keyboard())
+
+
+async def cmd_help(message: Message, company_id: int) -> None:
+    async with SessionFactory() as session:
+        lang = await _menu_lang(session, company_id, message.chat.id)
+    await message.answer(t(lang, "help_text"))
+
+
+async def fallback(message: Message, state: FSMContext, company_id: int) -> None:
+    if await state.get_state() is not None:
         return
-    await state.update_data(first_name=_cap(text))
-    await state.set_state(Registration.last_name)
-    await message.answer("2/3 — Familiyangizni yozing:")
-
-
-async def reg_last_name(message: Message, state: FSMContext) -> None:
-    text = message.text.strip()
-    if not NAME_RE.fullmatch(text):
-        await message.answer("Iltimos, faqat harflardan iborat familiya yozing (2–30 belgi).")
-        return
-    await state.update_data(last_name=_cap(text))
-    await state.set_state(Registration.phone)
-    await message.answer(
-        "3/3 — Telefon raqamingizni yuboring. Pastdagi «📱 Raqamni yuborish» tugmasini "
-        "bosing yoki raqamni yozing (masalan, +998 90 123 45 67).",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
-            resize_keyboard=True,
-            one_time_keyboard=True,
-        ),
-    )
-
-
-async def reg_phone_contact(message: Message, state: FSMContext, bot_db_id: int) -> None:
-    await _finish_registration(message, state, message.contact.phone_number, bot_db_id)
-
-
-async def reg_phone_text(message: Message, state: FSMContext, bot_db_id: int) -> None:
-    await _finish_registration(message, state, message.text, bot_db_id)
-
-
-async def menu_ticket(message: Message, company_id: int) -> None:
-    await cmd_ticket(message, company_id)
-
-
-async def menu_status(message: Message, company_id: int) -> None:
-    await cmd_status(message, company_id)
-
-
-async def fallback(message: Message, state: FSMContext) -> None:
-    if await state.get_state() is None:
-        await message.answer("Ro'yxatdan o'tish uchun /start ni bosing.", reply_markup=MAIN_MENU)
+    async with SessionFactory() as session:
+        lang = await _menu_lang(session, company_id, message.chat.id)
+    await message.answer(t(lang, "start_over"), reply_markup=main_menu(lang))
 
 
 async def _finish_registration(
-    message: Message, state: FSMContext, raw_phone: str, bot_db_id: int
+    message: Message, state: FSMContext, raw_phone: str, bot_db_id: int, lang: str
 ) -> None:
     phone = normalize_phone(raw_phone)
     if phone is None:
-        await message.answer("Raqam noto'g'ri. O'zbekiston raqamini kiriting: +998 XX XXX XX XX")
+        await message.answer(t(lang, "phone_invalid"), reply_markup=phone_keyboard(lang))
         return
     data = await state.get_data()
     async with SessionFactory() as session:
         event = await session.get(SaleEvent, data["event_id"])
         if event is None or not event.registration_open():
             await state.clear()
-            await message.answer(
-                "Afsuski, bu tadbir uchun ro'yxat yopildi.", reply_markup=MAIN_MENU
-            )
+            await message.answer(t(lang, "registration_closed"), reply_markup=main_menu(lang))
             return
+        # one phone = one ticket per event: a duplicate gets the existing one
         existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
         if existing is not None:
             await state.clear()
@@ -377,11 +594,8 @@ async def _finish_registration(
                 if existing.bot_id is None:
                     existing.bot_id = bot_db_id
                 await session.commit()
-            await message.answer(
-                "Bu telefon raqamiga navbat allaqachon berilgan. Mana u:",
-                reply_markup=MAIN_MENU,
-            )
-            await _send_ticket(message, session, existing)
+            await message.answer(t(lang, "phone_taken"), reply_markup=main_menu(lang))
+            await _send_ticket(message, session, existing, lang)
             return
         try:
             ticket = await ticket_service.create_ticket(
@@ -396,13 +610,25 @@ async def _finish_registration(
             )
         except DomainError as exc:
             await state.clear()
-            await message.answer(exc.message, reply_markup=MAIN_MENU)
+            await message.answer(exc.message, reply_markup=main_menu(lang))
             return
         await state.clear()
         queue_service.schedule_event_broadcast(event.id)
-        await message.answer("✅ Ro'yxatdan o'tdingiz!", reply_markup=MAIN_MENU)
-        await _send_ticket(message, session, ticket)
+        await message.answer(t(lang, "registered_ok"), reply_markup=main_menu(lang))
+        await _send_ticket(message, session, ticket, lang)
         log.info("New ticket #%s (%s) for event %s via bot", ticket.number, phone, event.id)
+
+
+async def menu_ticket(message: Message, company_id: int) -> None:
+    await cmd_ticket(message, company_id)
+
+
+async def menu_status(message: Message, company_id: int) -> None:
+    await cmd_status(message, company_id)
+
+
+async def menu_info(message: Message, company_id: int) -> None:
+    await cmd_info(message, company_id)
 
 
 def build_router() -> Router:
@@ -412,18 +638,24 @@ def build_router() -> Router:
     router.message.register(cmd_start, CommandStart())
     router.message.register(cmd_ticket, Command("navbat", "ticket"))
     router.message.register(cmd_status, Command("holat", "status"))
+    router.message.register(cmd_info, Command("info", "malumot"))
     router.message.register(cmd_help, Command("help"))
+    router.callback_query.register(
+        choose_language_start, Registration.choosing_language, F.data.startswith("lang:")
+    )
+    router.callback_query.register(change_language, F.data.startswith("lang:"))
     router.callback_query.register(
         choose_event, Registration.choosing_event, F.data.startswith("ev:")
     )
     router.callback_query.register(
         choose_branch, Registration.choosing_branch, F.data.startswith("br:")
     )
-    router.message.register(reg_first_name, Registration.first_name, F.text)
-    router.message.register(reg_last_name, Registration.last_name, F.text)
+    router.message.register(reg_full_name, Registration.full_name, F.text)
     router.message.register(reg_phone_contact, Registration.phone, F.contact)
     router.message.register(reg_phone_text, Registration.phone, F.text)
-    router.message.register(menu_ticket, F.text == BTN_MY_TICKET)
-    router.message.register(menu_status, F.text == BTN_STATUS)
+    router.message.register(menu_ticket, F.text.in_(BTN_TICKET_ALL))
+    router.message.register(menu_status, F.text.in_(BTN_STATUS_ALL))
+    router.message.register(menu_info, F.text.in_(BTN_INFO_ALL))
+    router.message.register(cmd_language, F.text.in_(BTN_LANG_ALL))
     router.message.register(fallback, F.text)
     return router

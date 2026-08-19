@@ -23,13 +23,14 @@ from app.core.config import get_settings
 from app.db.base import now_utc
 from app.models import (
     LATE_ORDER_BASE,
+    BotUser,
     Company,
     Desk,
     SaleEvent,
     Ticket,
     TicketStatus,
 )
-from app.services import notify
+from app.services import i18n, notify
 from app.services.broadcast import schedule_event_broadcast
 from app.services.errors import ConflictError, DomainError, NotFoundError
 
@@ -280,6 +281,20 @@ async def _notify(event: SaleEvent, ticket: Ticket, text: str) -> None:
     )
 
 
+async def _ticket_lang(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> str:
+    """Language the client chose in the bot (bot_users) — notifications go
+    out in it. Tickets without a chat fall back to the default (no send)."""
+    if ticket.telegram_chat_id is None:
+        return i18n.DEFAULT_LANG
+    lang = await db.scalar(
+        select(BotUser.language).where(
+            BotUser.company_id == event.company_id,
+            BotUser.chat_id == ticket.telegram_chat_id,
+        )
+    )
+    return i18n.norm_lang(lang)
+
+
 # ----------------------------------------------------------------- actions ---
 
 async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[str, Any]:
@@ -301,21 +316,22 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
         ticket.checked_in_at = now
         await db.commit()
         position = await position_of(db, ticket)
+        lang = await _ticket_lang(db, event, ticket)
         if on_time and not event.queue_started(now):
-            message = (
-                f"✅ Kelganingiz qayd etildi (№{ticket.number}).\n"
-                f"Navbat {fmt_local(event.checkin_until)} da boshlanadi. Tartib botdan "
-                f"ro'yxatdan o'tgan vaqt bo'yicha belgilanadi — hozircha siz {position}-o'rindasiz."
+            message = i18n.t(
+                lang,
+                "ntf_checkin_prequeue",
+                number=ticket.number,
+                time=fmt_local(event.checkin_until),
+                position=position,
             )
         elif on_time:
-            message = (
-                f"✅ Kelganingiz qayd etildi (№{ticket.number}). Navbatingizni kuting — "
-                f"sizdan oldin {position - 1} kishi bor. Chaqirilganingizda xabar keladi."
+            message = i18n.t(
+                lang, "ntf_checkin_queue", number=ticket.number, ahead=position - 1
             )
         else:
-            message = (
-                f"✅ Qayd etildi (№{ticket.number}). Skanerlash vaqti tugagani uchun kun "
-                f"oxiri navbatiga qo'shildingiz — sizdan oldin {position - 1} kishi bor."
+            message = i18n.t(
+                lang, "ntf_checkin_late", number=ticket.number, ahead=position - 1
             )
         schedule_event_broadcast(event.id)
         await _notify(event, ticket, message)
@@ -327,10 +343,9 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
             ticket.status = TicketStatus.CANCELLED
             await db.commit()
             schedule_event_broadcast(event.id)
+            lang = await _ticket_lang(db, event, ticket)
             await _notify(
-                event,
-                ticket,
-                f"Navbatingiz (№{ticket.number}) bekor qilindi: ikki marta chaqiruvda bo'lmadingiz.",
+                event, ticket, i18n.t(lang, "ntf_cancelled_two_skips", number=ticket.number)
             )
             return {
                 "ok": False,
@@ -346,11 +361,11 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
         await db.commit()
         position = await position_of(db, ticket)
         schedule_event_broadcast(event.id)
+        lang = await _ticket_lang(db, event, ticket)
         await _notify(
             event,
             ticket,
-            f"↩️ Kun oxiri navbatiga qo'shildingiz (№{ticket.number}). "
-            f"Sizdan oldin {position - 1} kishi bor.",
+            i18n.t(lang, "ntf_rejoined_late", number=ticket.number, ahead=position - 1),
         )
         return {"ok": True, "kind": "late", "message": "Kun oxiri navbatiga qo'shildi", "ticket": ticket}
 
@@ -414,11 +429,17 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
     ticket.call_count += 1
     await db.commit()
     schedule_event_broadcast(event.id)
+    lang = await _ticket_lang(db, event, ticket)
     await _notify(
         event,
         ticket,
-        f"🔔 Sizning navbatingiz! №{ticket.number} — {desk.number}-stolga yaqinlashing.\n"
-        f"{settings.call_timeout_minutes} daqiqa ichida kelmasangiz o'tkazib yuborilasiz.",
+        i18n.t(
+            lang,
+            "ntf_called",
+            number=ticket.number,
+            desk=desk.number,
+            minutes=settings.call_timeout_minutes,
+        ),
     )
     return ticket
 
@@ -431,11 +452,11 @@ async def recall(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.call_count += 1
     await db.commit()
     schedule_event_broadcast(event.id)
-    desk_number = desk.number if desk else "?"
+    lang = await _ticket_lang(db, event, ticket)
     await _notify(
         event,
         ticket,
-        f"🔔🔔 Takroriy chaqiruv: №{ticket.number} — {desk_number}-stolga yaqinlashing!",
+        i18n.t(lang, "ntf_recalled", number=ticket.number, desk=desk.number if desk else "?"),
     )
     return ticket
 
@@ -457,17 +478,9 @@ async def skip(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.desk_id = None
     await db.commit()
     schedule_event_broadcast(event.id)
-    if ticket.skip_count >= 2:
-        text = (
-            "⏭ Chaqiruvda yana bo'lmadingiz. Kun oxiri navbati faqat bir marta beriladi — "
-            "qabulxonaga murojaat qiling."
-        )
-    else:
-        text = (
-            "⏭ Afsuski, chaqiruvda bo'lmadingiz va o'tkazib yuborildingiz. Ofisda bo'lsangiz, "
-            "qabulxonada QR-kodingizni qayta ko'rsating — kun oxiri navbatiga qo'shamiz (bir marta)."
-        )
-    await _notify(event, ticket, text)
+    lang = await _ticket_lang(db, event, ticket)
+    key = "ntf_skip_final" if ticket.skip_count >= 2 else "ntf_skip_once"
+    await _notify(event, ticket, i18n.t(lang, key))
     return ticket
 
 
@@ -478,11 +491,8 @@ async def finish(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.finished_at = now_utc()
     await db.commit()
     schedule_event_broadcast(event.id)
-    await _notify(
-        event,
-        ticket,
-        f"🎉 Rahmat! Xizmat yakunlandi (№{ticket.number}). Yaxshi kun tilaymiz.",
-    )
+    lang = await _ticket_lang(db, event, ticket)
+    await _notify(event, ticket, i18n.t(lang, "ntf_done", number=ticket.number))
     return ticket
 
 
@@ -493,5 +503,6 @@ async def cancel(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     ticket.desk_id = None
     await db.commit()
     schedule_event_broadcast(event.id)
-    await _notify(event, ticket, f"Navbatingiz (№{ticket.number}) administrator tomonidan bekor qilindi.")
+    lang = await _ticket_lang(db, event, ticket)
+    await _notify(event, ticket, i18n.t(lang, "ntf_cancelled_admin", number=ticket.number))
     return ticket

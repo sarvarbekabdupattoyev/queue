@@ -41,11 +41,16 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 - **Sale events** — many per company, each with its own dates (entered as Tashkent local time,
   24-hour), live phase (`registration → checkin → queue`), a branch multiselect and an
   unguessable public display link (`?branch=` pins a TV to one branch).
-- **Up to 3 parallel Telegram bots per company** (aiogram): registration conversation
-  (event → branch → name → surname → phone via contact button), QR photo delivery, `/navbat`
-  and `/holat` commands, push notifications on check-in / call / skip / finish. Telegram caps
-  one bot at ~30 messages/s, so companies expecting a rush (up to ~10 000 sign-ups a minute)
-  spread the load across several bots — each client is notified via the bot they registered
+- **Up to 3 parallel Telegram bots per company** (aiogram): trilingual conversation —
+  the client picks O'zbek / Русский / English on first `/start` (inline buttons, stored per
+  chat, switchable from the menu) and everything, including queue notifications, follows that
+  language. Registration: event → branch → **F.I.Sh. in one line** → phone via the **contact
+  button only** (typed numbers are rejected; one phone = one ticket, a duplicate phone gets
+  its existing ticket shown back). QR photo delivery, `/navbat`, `/holat` and `/info`
+  (company card: logo, locations, upcoming sale dates, contact phones — always one tap away
+  in the menu), push notifications on check-in / call / skip / finish. Telegram caps one bot
+  at ~30 messages/s, so companies expecting a rush (up to ~10 000 sign-ups a minute) spread
+  the load across several bots — each client is notified via the bot they registered
   through.
 - **Live everywhere** — WebSocket state for the TV display, manager panel, scanner and event
   dashboard, with automatic reconnect + HTTP polling fallback.

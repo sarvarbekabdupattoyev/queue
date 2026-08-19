@@ -1,0 +1,168 @@
+"""Bot conversation building blocks: the trilingual message table, one-line
+F.I.Sh. parsing, per-chat language storage, and localized queue
+notifications."""
+
+from datetime import timedelta
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
+
+from app.db.base import now_utc
+from app.db.session import SessionFactory
+from app.models import BotUser, Company, SaleEvent, TicketStatus
+from app.services import i18n, notify, queue_service, ticket_service
+from app.services.i18n import _T, t
+from app.services.telegram.handlers import (
+    _save_lang,
+    _stored_lang,
+    build_info_text,
+    split_full_name,
+)
+from tests.conftest import auth, create_company, register_owner
+
+NOW = now_utc
+
+
+async def _wait_for(predicate, timeout: float = 3.0) -> None:
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("condition not met in time")
+        await asyncio.sleep(0.02)
+
+
+def test_i18n_table_is_complete():
+    for key, per_lang in _T.items():
+        assert set(per_lang) == set(i18n.LANGS), f"{key} missing a language"
+        for lang, text in per_lang.items():
+            assert text.strip(), f"{key}/{lang} is empty"
+    for status in TicketStatus:
+        for lang in i18n.LANGS:
+            assert i18n.status_label(lang, status)
+
+
+def test_i18n_falls_back_to_uzbek():
+    assert t(None, "registered_ok") == t("uz", "registered_ok")
+    assert t("de", "registered_ok") == t("uz", "registered_ok")
+    # formatting-heavy keys render in every language without KeyError
+    for lang in i18n.LANGS:
+        text = t(
+            lang,
+            "ticket_caption",
+            intro="", number=1234, event="Sotuv", starts="09:00 (01.09.2026)",
+            branch_line="", name="Test Testov", phone="+998 90 123 45 67",
+            deadline="10:00 (01.09.2026)", status="ok",
+        )
+        assert "1234" in text
+        assert t(lang, "ntf_called", number=1, desk=2, minutes=3)
+
+
+def test_split_full_name_parses_one_line_fio():
+    assert split_full_name("sardor rahimov akmal o'g'li") == ("Sardor", "Rahimov Akmal O'g'li")
+    assert split_full_name("Dilnoza Xolmatova") == ("Dilnoza", "Xolmatova")
+    assert split_full_name("Сардор Рахимов Акмал угли") == ("Сардор", "Рахимов Акмал Угли")
+    assert split_full_name("Sardor") is None            # surname required
+    assert split_full_name("Sardor R4himov") is None    # digits rejected
+    assert split_full_name("a b") is None               # too-short words
+    assert split_full_name("A B C D E F") is None       # too many words
+    assert split_full_name("Sardor " + "Juda" * 20) is None  # over the column cap
+
+
+async def test_language_is_stored_per_company_chat(client):
+    token = (await register_owner(client))["access_token"]
+    company = await create_company(client, token)
+
+    async with SessionFactory() as db:
+        assert await _stored_lang(db, company["id"], 777) is None
+        await _save_lang(db, company["id"], 777, "ru")
+        assert await _stored_lang(db, company["id"], 777) == "ru"
+        # saving again updates the same row instead of duplicating it
+        await _save_lang(db, company["id"], 777, "en")
+        assert await _stored_lang(db, company["id"], 777) == "en"
+        count = await db.scalar(
+            select(func.count()).select_from(BotUser).where(BotUser.chat_id == 777)
+        )
+        assert count == 1
+
+
+async def test_notifications_use_the_client_language(client, monkeypatch):
+    token = (await register_owner(client))["access_token"]
+    company = await create_company(client, token)
+    event_resp = await client.post(
+        "/api/events",
+        json={
+            "name": "Sotuv kuni",
+            "starts_at": (NOW() - timedelta(minutes=60)).isoformat(),
+            "checkin_until": (NOW() + timedelta(minutes=60)).isoformat(),
+        },
+        headers=auth(token),
+    )
+    event_id = event_resp.json()["id"]
+
+    sent: list[tuple[int, str]] = []
+
+    async def fake_send(company_id, chat_id, text, bot_id=None):
+        sent.append((chat_id, text))
+
+    monkeypatch.setattr(notify, "send_telegram_text", fake_send)
+
+    async with SessionFactory() as db:
+        await _save_lang(db, company["id"], 555, "ru")
+        event = await db.get(SaleEvent, event_id)
+        ticket = await ticket_service.create_ticket(
+            db, event, first_name="Иван", last_name="Иванов", phone="+998901112233",
+            telegram_chat_id=555,
+        )
+        number = ticket.number
+
+    checkin = await client.post(
+        f"/api/queue/{event_id}/checkin", json={"number": number}, headers=auth(token)
+    )
+    assert checkin.status_code == 200, checkin.text
+    await _wait_for(lambda: len(sent) == 1)
+    chat_id, text = sent[0]
+    assert chat_id == 555
+    assert text == t("ru", "ntf_checkin_prequeue", number=number,
+                     time=queue_service.fmt_local(event.checkin_until), position=1)
+
+
+async def test_company_info_text_lists_everything(client):
+    token = (await register_owner(client))["access_token"]
+    company_data = await create_company(client, token)
+    await client.post(
+        "/api/company/phones",
+        json={"phone": "+998712005050", "label": "Call-markaz"},
+        headers=auth(token),
+    )
+    await client.post(
+        "/api/company/locations",
+        json={"name": "Bosh ofis", "address": "Toshkent, Yunusobod 4-mavze"},
+        headers=auth(token),
+    )
+    event_resp = await client.post(
+        "/api/events",
+        json={
+            "name": "Katta sotuv",
+            "starts_at": (NOW() + timedelta(days=1)).isoformat(),
+            "checkin_until": (NOW() + timedelta(days=1, hours=2)).isoformat(),
+        },
+        headers=auth(token),
+    )
+    assert event_resp.status_code == 201
+
+    async with SessionFactory() as db:
+        company = await db.scalar(
+            select(Company)
+            .where(Company.id == company_data["id"])
+            .options(selectinload(Company.phones), selectinload(Company.locations))
+        )
+        events = (await db.scalars(select(SaleEvent))).all()
+        for lang in i18n.LANGS:
+            text = build_info_text(lang, company, list(events), [])
+            assert company.name in text
+            assert "Katta sotuv" in text
+            assert "Bosh ofis" in text
+            assert "+998 71 200 50 50" in text
+            assert t(lang, "info_phones_header") in text

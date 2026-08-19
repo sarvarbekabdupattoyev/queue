@@ -35,15 +35,19 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.redis import CH_BOT_CONTROL, CH_NOTIFY, get_redis
+from app.services import i18n
 from app.services.errors import DomainError
 
 log = logging.getLogger(__name__)
 
-BOT_COMMANDS = [
-    BotCommand(command="start", description="Ro'yxatdan o'tish"),
-    BotCommand(command="navbat", description="Mening navbatim (QR-kod)"),
-    BotCommand(command="holat", description="Navbat holati"),
-]
+
+def bot_commands(lang: str) -> list[BotCommand]:
+    return [
+        BotCommand(command="start", description=i18n.t(lang, "cmd_start_desc")),
+        BotCommand(command="navbat", description=i18n.t(lang, "cmd_ticket_desc")),
+        BotCommand(command="holat", description=i18n.t(lang, "cmd_status_desc")),
+        BotCommand(command="info", description=i18n.t(lang, "cmd_info_desc")),
+    ]
 
 
 def webhook_secret(bot_db_id: int) -> str:
@@ -91,7 +95,11 @@ class CompanyBotRunner:
         self.username = me.username
         self.dp.include_router(build_router())
         with suppress(Exception):
-            await self.bot.set_my_commands(BOT_COMMANDS)
+            # Telegram shows the list matching the client's language; the
+            # default (no language_code) is Uzbek
+            await self.bot.set_my_commands(bot_commands(i18n.DEFAULT_LANG))
+            for lang in ("ru", "en"):
+                await self.bot.set_my_commands(bot_commands(lang), language_code=lang)
 
         if settings.bot_webhook_base:
             url = f"{settings.bot_webhook_base.rstrip('/')}/{self.bot_db_id}"
