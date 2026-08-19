@@ -4,25 +4,39 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Branch } from '../api/types'
 import { IconBuilding, IconPlus } from '../components/icons'
-import { ActionForm, EmptyState, Field, Modal, Spinner, useToast } from '../components/ui'
+import {
+  ActionForm,
+  EmptyState,
+  Field,
+  Modal,
+  Spinner,
+  useConfirm,
+  useToast,
+} from '../components/ui'
 
 export default function BranchesPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
   const { data: branches, isLoading } = useQuery({
     queryKey: ['branches'],
     queryFn: () => api<Branch[]>('/branches'),
   })
+
   const [editing, setEditing] = useState<Branch | 'new' | null>(null)
   const [form, setForm] = useState({ name: '', address: '' })
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['branches'] })
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['branches'] })
+    // desks, staff and events all carry a branch — keep their lists in sync
+    queryClient.invalidateQueries({ queryKey: ['desks'] })
+    queryClient.invalidateQueries({ queryKey: ['employees'] })
+    queryClient.invalidateQueries({ queryKey: ['events'] })
+  }
   const remove = useMutation({
     mutationFn: (branch: Branch) => api(`/branches/${branch.id}`, { method: 'DELETE' }),
     onSuccess: () => {
       invalidate()
-      queryClient.invalidateQueries({ queryKey: ['desks'] })
-      queryClient.invalidateQueries({ queryKey: ['employees'] })
       toast('Filial o‘chirildi')
     },
     onError: (e: Error) => toast(e.message, true),
@@ -39,16 +53,14 @@ export default function BranchesPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Filiallar</h1>
-          <div className="sub">
-            Bir tadbir bir nechta filialda o‘tishi mumkin — har bir filialning menejerlari,
-            stollari va navbati alohida bo‘ladi
-          </div>
-        </div>
-        <button className="btn" onClick={openNew}>
-          <IconPlus size={16} /> Filial qo‘shish
+      <div className="page-actions">
+        <span className="hint">
+          Filiallar ixtiyoriy. Bitta tadbir bir nechta filialda o‘tishi mumkin — har bir
+          filialning o‘z menejerlari, stollari va alohida navbati bo‘ladi; mijoz botda filialini
+          tanlaydi.
+        </span>
+        <button className="btn push" onClick={openNew}>
+          <IconPlus size={15} /> Filial qo‘shish
         </button>
       </div>
 
@@ -56,11 +68,17 @@ export default function BranchesPage() {
         {isLoading ? (
           <Spinner />
         ) : !branches?.length ? (
-          <EmptyState icon={IconBuilding}>
-            Filiallar ixtiyoriy: bitta ofis bo‘lsa, bu bo‘limni o‘tkazib yuboring. Bir nechta
-            ofis bo‘lsa, avval filiallarni qo‘shing — keyin har biriga{' '}
-            <Link to="/dashboard/employees">menejerlar</Link> va{' '}
-            <Link to="/dashboard/desks">stollar</Link> biriktirasiz.
+          <EmptyState
+            icon={IconBuilding}
+            action={
+              <button className="btn" onClick={openNew}>
+                <IconPlus size={15} /> Filial qo‘shish
+              </button>
+            }
+          >
+            Filiallar hali qo‘shilmagan — bu ixtiyoriy. Bitta ofis bo‘lsa, filialsiz davom
+            etavering; bir nechta manzil bo‘lsa, filiallarni kiriting va har biriga menejerlar
+            bilan stollar biriktiring.
           </EmptyState>
         ) : (
           <div className="table-wrap">
@@ -77,27 +95,31 @@ export default function BranchesPage() {
               <tbody>
                 {branches.map((branch) => (
                   <tr key={branch.id}>
-                    <td style={{ fontWeight: 600 }}>{branch.name}</td>
+                    <td className="cell-main">{branch.name}</td>
                     <td className="muted">{branch.address || '—'}</td>
                     <td className="mono">{branch.employee_count}</td>
                     <td className="mono">{branch.desk_count}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button className="btn ghost sm" onClick={() => openEdit(branch)}>
-                        Tahrirlash
-                      </button>{' '}
-                      <button
-                        className="btn danger-ghost sm"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `«${branch.name}» o‘chirilsinmi? Filial stollari ham o‘chadi, xodimlari filialsiz qoladi.`,
+                    <td>
+                      <span className="row-actions">
+                        <button className="btn ghost sm" onClick={() => openEdit(branch)}>
+                          Tahrirlash
+                        </button>
+                        <button
+                          className="btn danger-ghost sm"
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `«${branch.name}» o‘chirilsinmi?`,
+                                description:
+                                  'Filial stollari ham o‘chadi, xodimlari esa filialsiz qoladi. Faol tadbirga ulangan filialni o‘chirib bo‘lmaydi.',
+                              })
                             )
-                          )
-                            remove.mutate(branch)
-                        }}
-                      >
-                        O‘chirish
-                      </button>
+                              remove.mutate(branch)
+                          }}
+                        >
+                          O‘chirish
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -110,10 +132,10 @@ export default function BranchesPage() {
       {!!branches?.length && (
         <div className="card">
           <p className="hint">
-            Keyingi qadam: har bir filial uchun <Link to="/dashboard/employees">menejer
-            qo‘shing</Link>, so‘ng <Link to="/dashboard/desks">stollar yaratib</Link> menejerlarni
-            biriktiring. Tadbir yaratayotganda kerakli filiallarni belgilaysiz — mijoz botda
-            filialini tanlaydi va navbat shu filial ichida yuradi.
+            Keyingi qadam: har bir filial uchun{' '}
+            <Link to="/dashboard/employees">menejer qo‘shing</Link>, so‘ng{' '}
+            <Link to="/dashboard/desks">stollar yaratib</Link> menejerlarni biriktiring. Tadbir
+            yaratayotganda kerakli filiallarni belgilaysiz.
           </p>
         </div>
       )}
@@ -121,6 +143,7 @@ export default function BranchesPage() {
       {editing && (
         <Modal
           title={editing === 'new' ? 'Yangi filial' : 'Filialni tahrirlash'}
+          description="Bot xabarlarida va tadbirlar ro‘yxatida ko‘rinadi."
           onClose={() => setEditing(null)}
         >
           <ActionForm
@@ -138,7 +161,7 @@ export default function BranchesPage() {
                     className="input"
                     value={form.name}
                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    placeholder="Masalan: Chilonzor filiali"
+                    placeholder="Masalan: Chilonzor"
                     required
                     minLength={2}
                   />
@@ -151,9 +174,6 @@ export default function BranchesPage() {
                     placeholder="Toshkent, Chilonzor 9-mavze"
                   />
                 </Field>
-                <p className="hint">
-                  Filial nomi va manzili mijozga botda filial tanlashda ko‘rinadi.
-                </p>
                 {error && <div className="error-text">{error}</div>}
                 <div className="modal-actions">
                   <button type="button" className="btn ghost" onClick={() => setEditing(null)}>

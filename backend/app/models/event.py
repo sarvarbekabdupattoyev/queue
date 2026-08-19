@@ -38,6 +38,8 @@ class SaleEvent(Base):
 
     company: Mapped["Company"] = relationship(back_populates="events")  # noqa: F821
     # branches the event runs in; empty = single-office event (no scoping).
+    # Replaces the earlier single `branch_id` column — one sale day can run in
+    # several branches at once, each with its own desks and queue.
     # lazy="selectin" keeps the list available in async code paths without
     # explicit eager-load options at every call site.
     branches: Mapped[list[Branch]] = relationship(

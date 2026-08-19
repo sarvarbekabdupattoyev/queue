@@ -8,7 +8,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
-import { IconCopy, IconX, type IconProps } from './icons'
+import { IconCopy, IconTrash, IconX, type IconProps } from './icons'
 
 export function Spinner() {
   return <div className="spinner" aria-label="Yuklanmoqda" />
@@ -16,10 +16,12 @@ export function Spinner() {
 
 export function Modal({
   title,
+  description,
   onClose,
   children,
 }: {
   title: string
+  description?: string
   onClose: () => void
   children: ReactNode
 }) {
@@ -32,7 +34,10 @@ export function Modal({
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
-          <h2>{title}</h2>
+          <div>
+            <h2>{title}</h2>
+            {description && <p>{description}</p>}
+          </div>
           <button type="button" className="icon-btn" aria-label="Yopish" onClick={onClose}>
             <IconX size={16} />
           </button>
@@ -63,7 +68,11 @@ export function EmptyState({
 }) {
   return (
     <div className="empty-state">
-      {Icon && <Icon size={34} />}
+      {Icon && (
+        <span className="halo">
+          <Icon size={22} />
+        </span>
+      )}
       <p>{children}</p>
       {action}
     </div>
@@ -93,6 +102,93 @@ export function ActionForm({
     }
   }
   return <form onSubmit={handle}>{children(busy, error)}</form>
+}
+
+// --------------------------------------------------------------- confirm ---
+
+interface ConfirmOptions {
+  title: string
+  description?: string
+  confirmLabel?: string
+  tone?: 'danger' | 'neutral'
+  icon?: (props: IconProps) => JSX.Element
+}
+
+const ConfirmContext = createContext<(options: ConfirmOptions) => Promise<boolean>>(() =>
+  Promise.resolve(false),
+)
+
+/** Styled replacement for window.confirm — resolves true on confirmation. */
+export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [current, setCurrent] = useState<
+    (ConfirmOptions & { resolve: (ok: boolean) => void }) | null
+  >(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+
+  const confirm = useCallback(
+    (options: ConfirmOptions) =>
+      new Promise<boolean>((resolve) => setCurrent({ ...options, resolve })),
+    [],
+  )
+  const settle = (ok: boolean) => {
+    current?.resolve(ok)
+    setCurrent(null)
+  }
+
+  useEffect(() => {
+    if (!current) return
+    cancelRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && settle(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current])
+
+  const tone = current?.tone ?? 'danger'
+  const Icon = current?.icon ?? IconTrash
+  return (
+    <ConfirmContext.Provider value={confirm}>
+      {children}
+      {current && (
+        <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && settle(false)}>
+          <div className="modal" style={{ maxWidth: 384 }} role="dialog" aria-modal="true" aria-label={current.title}>
+            <span className={`confirm-icon${tone === 'danger' ? ' danger' : ''}`}>
+              <Icon size={18} />
+            </span>
+            <h2 style={{ fontSize: 23, lineHeight: 1.15 }}>{current.title}</h2>
+            {current.description && (
+              <p className="hint" style={{ marginTop: 8 }}>
+                {current.description}
+              </p>
+            )}
+            <div className="modal-actions" style={{ justifyContent: 'stretch' }}>
+              <button
+                type="button"
+                className={`btn ${tone === 'danger' ? 'coral' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => settle(true)}
+              >
+                {current.confirmLabel ?? 'O‘chirish'}
+              </button>
+              <button
+                ref={cancelRef}
+                type="button"
+                className="btn ghost"
+                style={{ flex: 1 }}
+                onClick={() => settle(false)}
+              >
+                Bekor qilish
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </ConfirmContext.Provider>
+  )
+}
+
+export function useConfirm() {
+  return useContext(ConfirmContext)
 }
 
 // ---------------------------------------------------------------- toasts ---

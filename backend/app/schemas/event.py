@@ -50,6 +50,8 @@ class EventOut(BaseModel):
     branches: list[EventBranchOut] = []
     ticket_count: int = 0
     checked_in_count: int = 0
+    branch_id: int | None = None
+    branch_name: str | None = None
 
 
 class TicketOut(BaseModel):

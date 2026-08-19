@@ -3,7 +3,9 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, getToken, wsUrl } from '../api/client'
 import type { SaleEvent, StaffState, Ticket, TicketStatus } from '../api/types'
-import { CopyButton, Spinner, useToast } from '../components/ui'
+import { PageTitle } from '../components/DashboardLayout'
+import { IconMapPin, IconMonitor } from '../components/icons'
+import { CopyButton, Spinner, useConfirm, useToast } from '../components/ui'
 import { formatDateTime, formatLongCountdown, prettyPhone } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 import { PHASE_LABEL } from './EventsPage'
@@ -22,6 +24,7 @@ export default function EventDetailPage() {
   const { eventId } = useParams()
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
   const now = useTick()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -31,7 +34,7 @@ export default function EventDetailPage() {
     queryKey: ['event', eventId],
     queryFn: () => api<SaleEvent>(`/events/${eventId}`),
   })
-  const { state } = useLiveState<StaffState>(
+  const { state, connected } = useLiveState<StaffState>(
     eventId ? wsUrl(`/ws/staff/${eventId}?token=${getToken()}`) : null,
     eventId ? () => api<StaffState>(`/events/${eventId}/state`) : null,
   )
@@ -81,28 +84,30 @@ export default function EventDetailPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>{event.name}</h1>
-          <div className="sub">
-            Boshlanish: {formatDateTime(event.starts_at)} · Skanerlash tugashi:{' '}
-            {formatDateTime(event.checkin_until)} · <span className={`badge ${phase.tone}`}>{phase.text}</span>
-            {hasBranches &&
-              event.branches.map((b) => (
-                <span key={b.id} className="badge blue" style={{ marginLeft: 6 }}>
-                  {b.name}
-                </span>
-              ))}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <PageTitle title={event.name} />
+
+      <div className="page-actions">
+        <span className={`badge ${phase.tone}`}>{phase.text}</span>
+        {event.branches.map((b) => (
+          <span key={b.id} className="badge dim">
+            <IconMapPin size={11} /> {b.name}
+          </span>
+        ))}
+        <span className="hint hide-sm">
+          {formatDateTime(event.starts_at)} — {formatDateTime(event.checkin_until)}
+        </span>
+        <span className={`conn-chip${connected ? ' on' : ''}`}>
+          <span className="dot" /> {connected ? 'jonli' : 'ulanmoqda…'}
+        </span>
+        <span className="push" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Link className="btn ghost sm" to="/scanner">
-            Skaner sahifasi
+            Skaner
           </Link>
           <Link className="btn ghost sm" to="/manager">
             Menejer paneli
           </Link>
           {hasBranches ? (
+            // each branch runs its own queue, so each gets its own TV board
             event.branches.map((b) => (
               <a
                 key={b.id}
@@ -111,22 +116,22 @@ export default function EventDetailPage() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Ekran: {b.name} ↗
+                <IconMonitor size={14} /> {b.name}
               </a>
             ))
           ) : (
             <a className="btn ghost sm" href={displayLink} target="_blank" rel="noreferrer">
-              Ofis ekrani ↗
+              <IconMonitor size={14} /> Ofis ekrani
             </a>
           )}
-          <CopyButton text={displayLink} label="Ekran havolasini nusxalash" />
-        </div>
+          <CopyButton text={displayLink} label="Havola" />
+        </span>
       </div>
 
       {event.is_active && untilQueue > 0 && (
-        <div className="card" style={{ borderColor: 'var(--amber)' }}>
-          <div className="card-title">Navbat boshlanishiga qoldi</div>
-          <div className="mono" style={{ fontSize: 30, color: 'var(--amber)' }}>
+        <div className="card">
+          <div className="stat-label">Navbat boshlanishiga qoldi</div>
+          <div className="stat-value" style={{ fontSize: 34, color: 'var(--amber)' }}>
             {formatLongCountdown(untilQueue)}
           </div>
           <p className="hint" style={{ marginTop: 6 }}>
@@ -136,9 +141,7 @@ export default function EventDetailPage() {
       )}
 
       <div className="card">
-        <div className="card-title">
-          <span>Jonli holat</span>
-        </div>
+        <div className="card-title">Jonli holat</div>
         <div className="stat-row">
           <div className="stat">
             <b>{stats?.registered ?? event.ticket_count}</b>
@@ -193,8 +196,8 @@ export default function EventDetailPage() {
 
       <div className="card">
         <div className="card-title">
-          <span>Mijozlar ro‘yxati</span>
-          <span style={{ display: 'flex', gap: 8 }}>
+          Mijozlar ro‘yxati
+          <span className="aux">
             <button className="btn ghost sm" onClick={() => seed.mutate()} disabled={seed.isPending}>
               +10 sinov mijozi
             </button>
@@ -263,33 +266,43 @@ export default function EventDetailPage() {
                     <tr key={ticket.id}>
                       <td className="num">{ticket.number}</td>
                       <td>
-                        {ticket.first_name} {ticket.last_name}
-                        {ticket.source === 'seed' && <span className="badge dim"> sinov</span>}
+                        <span className="cell-main" style={{ fontWeight: 500 }}>
+                          {ticket.first_name} {ticket.last_name}
+                        </span>{' '}
+                        {ticket.source === 'seed' && <span className="badge dim">sinov</span>}
                       </td>
                       {hasBranches && <td className="muted">{ticket.branch_name ?? '—'}</td>}
                       <td className="muted">{prettyPhone(ticket.phone)}</td>
                       <td className="muted">{formatDateTime(ticket.registered_at)}</td>
                       <td>
-                        <span className={`badge ${label.tone}`}>{label.text}</span>
-                        {ticket.late && <span className="badge amber"> kun oxiri</span>}
+                        <span className={`badge ${label.tone}`}>{label.text}</span>{' '}
+                        {ticket.late && <span className="badge amber">kun oxiri</span>}
                       </td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        {(ticket.status === 'registered' || ticket.status === 'skipped') && (
-                          <button className="btn ghost sm" onClick={() => checkin.mutate(ticket.number)}>
-                            Keldi
-                          </button>
-                        )}{' '}
-                        {!['done', 'cancelled'].includes(ticket.status) && (
-                          <button
-                            className="btn danger-ghost sm"
-                            onClick={() => {
-                              if (window.confirm(`№${ticket.number} bekor qilinsinmi?`))
-                                cancelTicket.mutate(ticket.number)
-                            }}
-                          >
-                            Bekor
-                          </button>
-                        )}
+                      <td>
+                        <span className="row-actions">
+                          {(ticket.status === 'registered' || ticket.status === 'skipped') && (
+                            <button className="btn ghost sm" onClick={() => checkin.mutate(ticket.number)}>
+                              Keldi
+                            </button>
+                          )}
+                          {!['done', 'cancelled'].includes(ticket.status) && (
+                            <button
+                              className="btn danger-ghost sm"
+                              onClick={async () => {
+                                if (
+                                  await confirm({
+                                    title: `№${ticket.number} bekor qilinsinmi?`,
+                                    description: `${ticket.first_name} ${ticket.last_name} navbatdan chiqariladi va botda xabar oladi.`,
+                                    confirmLabel: 'Bekor qilish',
+                                  })
+                                )
+                                  cancelTicket.mutate(ticket.number)
+                              }}
+                            >
+                              Bekor
+                            </button>
+                          )}
+                        </span>
                       </td>
                     </tr>
                   )

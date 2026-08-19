@@ -3,11 +3,8 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { wsUrl } from '../api/client'
 import { IconExpand, IconSound } from '../components/icons'
 import type { PublicState } from '../api/types'
-import { formatCountdown, formatLongCountdown } from '../lib/format'
+import { UZ_DAYS, UZ_MONTHS, formatCountdown, formatLongCountdown } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
-
-const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentyabr', 'oktyabr', 'noyabr', 'dekabr']
-const UZ_DAYS = ['yakshanba', 'dushanba', 'seshanba', 'chorshanba', 'payshanba', 'juma', 'shanba']
 
 async function fetchState(displayCode: string): Promise<PublicState> {
   const response = await fetch(`/api/public/display/${displayCode}`)

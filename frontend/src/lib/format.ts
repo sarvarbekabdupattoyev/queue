@@ -9,6 +9,15 @@ function tashkentClock(iso: string): Date {
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
+export const UZ_MONTHS = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentyabr', 'oktyabr', 'noyabr', 'dekabr']
+export const UZ_DAYS = ['yakshanba', 'dushanba', 'seshanba', 'chorshanba', 'payshanba', 'juma', 'shanba']
+
+/** "dushanba, 18-avgust" — the topbar date line. */
+export function uzDateLine(at: Date = new Date()): string {
+  return `${UZ_DAYS[at.getDay()]}, ${at.getDate()}-${UZ_MONTHS[at.getMonth()]}`
+}
+
+
 export function formatDateTime(iso: string): string {
   const d = tashkentClock(iso)
   return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`

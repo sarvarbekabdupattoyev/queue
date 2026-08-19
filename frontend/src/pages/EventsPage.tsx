@@ -1,11 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Branch, Desk, EventPhase, SaleEvent, User } from '../api/types'
 import { useCompany } from '../components/DashboardLayout'
-import { IconCheck, IconPlus } from '../components/icons'
-import { ActionForm, Field, Modal, Spinner, useToast } from '../components/ui'
+import {
+  IconCalendar,
+  IconCheck,
+  IconChevronRight,
+  IconMapPin,
+  IconPlus,
+} from '../components/icons'
+import { ActionForm, EmptyState, Field, Modal, Spinner, useConfirm, useToast } from '../components/ui'
 import { formatDateTime, isoToTashkentParts, tashkentPartsToIso } from '../lib/format'
 
 export const PHASE_LABEL: Record<EventPhase, { text: string; tone: string }> = {
@@ -100,6 +106,9 @@ const EMPTY_FORM: EventForm = {
 export default function EventsPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { data: company } = useCompany()
   const { data: events, isLoading } = useQuery({
     queryKey: ['events'],
@@ -141,8 +150,32 @@ export default function EventsPage() {
     },
   ]
   const setupLoaded = company !== undefined && employees !== undefined && desks !== undefined
-  const missingSteps = setupLoaded ? setupSteps.filter((s) => !s.done) : []
-  const setupReady = setupLoaded && missingSteps.length === 0
+  const setupReady = setupLoaded && setupSteps.every((s) => s.done)
+
+  const openNew = () => {
+    if (!setupReady) {
+      toast('Avval tayyorgarlik qadamlarini bajaring', true)
+      return
+    }
+    setForm({ ...EMPTY_FORM, branch_ids: (branches ?? []).map((b) => b.id) })
+    setEditing('new')
+  }
+
+  // the topbar CTA lands here with ?new=1 — open the create dialog once
+  useEffect(() => {
+    if (!searchParams.get('new')) return
+    setSearchParams({}, { replace: true })
+    if (!setupLoaded) return
+    if (!setupReady) {
+      toast('Avval tayyorgarlik qadamlarini bajaring', true)
+      return
+    }
+    setForm({ ...EMPTY_FORM, branch_ids: (branches ?? []).map((b) => b.id) })
+    setEditing('new')
+    // branches/setup flags are read once the CTA fires; re-running on their
+    // change would reopen the dialog behind the user
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams, setupLoaded, setupReady])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['events'] })
   const toggleActive = useMutation({
@@ -163,10 +196,6 @@ export default function EventsPage() {
     onError: (e: Error) => toast(e.message, true),
   })
 
-  const openNew = () => {
-    setForm({ ...EMPTY_FORM, branch_ids: (branches ?? []).map((b) => b.id) })
-    setEditing('new')
-  }
   const openEdit = (event: SaleEvent) => {
     const starts = isoToTashkentParts(event.starts_at)
     const checkin = isoToTashkentParts(event.checkin_until)
@@ -188,25 +217,25 @@ export default function EventsPage() {
         : [...f.branch_ids, id],
     }))
   }
+  const confirmRemove = async (event: SaleEvent) => {
+    if (
+      await confirm({
+        title: `«${event.name}» o‘chirilsinmi?`,
+        description: 'Tadbir bilan birga uning barcha navbatlari ham o‘chadi. Bu amalni qaytarib bo‘lmaydi.',
+      })
+    )
+      remove.mutate(event)
+  }
+
+  const branchNames = (event: SaleEvent) => event.branches.map((b) => b.name).join(', ')
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Sotuv tadbirlari</h1>
-          <div className="sub">
-            Bot tadbir boshlanishidan skanerlash tugashigacha raqam beradi; skanerlash tugagach
-            navbat ro‘yxatdan o‘tish vaqti bo‘yicha boshlanadi
-          </div>
-        </div>
-        <button
-          className="btn"
-          onClick={openNew}
-          disabled={!setupReady}
-          title={setupReady ? undefined : 'Avval quyidagi tayyorgarlik qadamlarini bajaring'}
-        >
-          <IconPlus size={16} /> Tadbir qo‘shish
-        </button>
+      <div className="page-actions">
+        <span className="hint">
+          Bot tadbir boshlanishidan skanerlash tugashigacha raqam beradi; keyin navbat ro‘yxat
+          vaqti bo‘yicha ishlaydi. Yangi tadbir — yuqoridagi tugma orqali.
+        </span>
       </div>
 
       {setupLoaded && !setupReady && (
@@ -238,91 +267,119 @@ export default function EventsPage() {
         {isLoading ? (
           <Spinner />
         ) : !events?.length ? (
-          <div className="empty">
+          <EmptyState
+            icon={IconCalendar}
+            action={
+              <button className="btn" onClick={openNew}>
+                <IconPlus size={15} /> Birinchi tadbirni qo‘shish
+              </button>
+            }
+          >
             Hozircha tadbirlar yo‘q. Sotuv kunini qo‘shing — mijozlar Telegram bot orqali
             ro‘yxatdan o‘tadi.
-          </div>
+          </EmptyState>
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Tadbir</th>
-                  {hasBranches && <th>Filiallar</th>}
-                  <th>Boshlanish</th>
-                  <th>Skanerlash tugashi</th>
-                  <th>Holat</th>
-                  <th>Ro‘yxat / Kelgan</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.map((event) => {
-                  const phase = PHASE_LABEL[event.phase]
-                  return (
-                    <tr key={event.id}>
-                      <td>
-                        <Link to={`/dashboard/events/${event.id}`} style={{ fontWeight: 600 }}>
-                          {event.name}
-                        </Link>
-                      </td>
-                      {hasBranches && (
+          <>
+            <div className="table-wrap only-desktop">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Tadbir</th>
+                    <th>Boshlanish</th>
+                    <th>Skanerlash tugashi</th>
+                    <th>Holat</th>
+                    <th style={{ textAlign: 'right' }}>Ro‘yxat / Kelgan</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.map((event) => {
+                    const phase = PHASE_LABEL[event.phase]
+                    return (
+                      <tr
+                        key={event.id}
+                        className="rowlink"
+                        onClick={() => navigate(`/dashboard/events/${event.id}`)}
+                      >
                         <td>
-                          {event.branches.length ? (
-                            event.branches.map((b) => (
-                              <span key={b.id} className="badge blue" style={{ marginRight: 4 }}>
-                                {b.name}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="muted">—</span>
+                          <Link
+                            to={`/dashboard/events/${event.id}`}
+                            className="cell-main"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {event.name}
+                          </Link>
+                          {!!event.branches.length && (
+                            <span className="cell-sub">
+                              <IconMapPin size={11} style={{ verticalAlign: -1 }} />{' '}
+                              {branchNames(event)}
+                            </span>
                           )}
                         </td>
-                      )}
-                      <td className="muted">{formatDateTime(event.starts_at)}</td>
-                      <td className="muted">{formatDateTime(event.checkin_until)}</td>
-                      <td>
+                        <td className="muted">{formatDateTime(event.starts_at)}</td>
+                        <td className="muted">{formatDateTime(event.checkin_until)}</td>
+                        <td>
+                          <span className={`badge ${phase.tone}`}>{phase.text}</span>
+                        </td>
+                        <td className="mono" style={{ textAlign: 'right' }}>
+                          {event.ticket_count} / {event.checked_in_count}
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <span className="row-actions">
+                            <button className="btn ghost sm" onClick={() => openEdit(event)}>
+                              Tahrirlash
+                            </button>
+                            <button className="btn ghost sm" onClick={() => toggleActive.mutate(event)}>
+                              {event.is_active ? 'Yopish' : 'Ochish'}
+                            </button>
+                            <button className="btn danger-ghost sm" onClick={() => void confirmRemove(event)}>
+                              O‘chirish
+                            </button>
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="stack-list only-mobile">
+              {events.map((event) => {
+                const phase = PHASE_LABEL[event.phase]
+                return (
+                  <Link className="stack-item" to={`/dashboard/events/${event.id}`} key={event.id}>
+                    <span className="top">
+                      <span style={{ minWidth: 0 }}>
+                        <span className="cell-main">{event.name}</span>
+                        <span className="cell-sub">
+                          {formatDateTime(event.starts_at)}
+                          {event.branches.length ? ` · ${branchNames(event)}` : ''}
+                        </span>
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
                         <span className={`badge ${phase.tone}`}>{phase.text}</span>
-                      </td>
-                      <td className="mono">
+                        <IconChevronRight size={15} className="muted" />
+                      </span>
+                    </span>
+                    <span className="foot">
+                      <span>Skanerlash: {formatDateTime(event.checkin_until)}</span>
+                      <span className="mono">
                         {event.ticket_count} / {event.checked_in_count}
-                      </td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <Link className="btn ghost sm" to={`/dashboard/events/${event.id}`}>
-                          Boshqarish
-                        </Link>{' '}
-                        <button className="btn ghost sm" onClick={() => openEdit(event)}>
-                          Tahrirlash
-                        </button>{' '}
-                        <button className="btn ghost sm" onClick={() => toggleActive.mutate(event)}>
-                          {event.is_active ? 'Yopish' : 'Ochish'}
-                        </button>{' '}
-                        <button
-                          className="btn danger-ghost sm"
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `«${event.name}» va uning barcha navbatlari o‘chirilsinmi?`,
-                              )
-                            )
-                              remove.mutate(event)
-                          }}
-                        >
-                          O‘chirish
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </span>
+                    </span>
+                  </Link>
+                )
+              })}
+            </div>
+          </>
         )}
       </div>
 
       {editing && (
         <Modal
           title={editing === 'new' ? 'Yangi sotuv tadbiri' : 'Tadbirni tahrirlash'}
+          description="Skanerlash tugagach chaqiruv ochiladi — tartib botdan ro‘yxatdan o‘tish vaqti bo‘yicha."
           onClose={() => setEditing(null)}
         >
           <ActionForm
@@ -393,11 +450,6 @@ export default function EventsPage() {
                     </p>
                   </div>
                 )}
-                <p className="hint">
-                  Shu vaqtgacha kelgan mijozlar QR kodini skanerlatadi. Vaqt tugagach chaqiruv
-                  boshlanadi: tartib — botdan ro‘yxatdan o‘tish vaqti bo‘yicha, faqat skanerdan
-                  o‘tganlar orasida. Kechikkanlar kun oxiri navbatiga qo‘shiladi.
-                </p>
                 {error && <div className="error-text">{error}</div>}
                 <div className="modal-actions">
                   <button type="button" className="btn ghost" onClick={() => setEditing(null)}>

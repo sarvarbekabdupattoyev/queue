@@ -19,13 +19,21 @@ invariants apply on top of these.
 - **Tokens only.** Every color, radius, shadow, and font comes from the CSS
   custom properties in `src/styles.css`. Never hardcode hex values or
   `px` shadows in components; if a token is missing, add it to BOTH themes.
+- Type is two-voice: `--display` (Instrument Serif) for page titles, card
+  titles and big numbers; `--body` (Inter) for everything else. Solid pastel
+  fills pair with the fixed `--on-pastel-*` inks (pastels stay light in both
+  themes); translucent `--tint-*-bg` chips pair with `--tint-*-text`.
+- Charts are the hand-rolled SVG primitives in `src/components/charts.tsx`
+  (BarChart / LineChart / Donut) — extend those, never add a chart library.
 - **Light and dark are equal citizens.** `:root` defines light,
   `[data-theme="dark"]` overrides. Any new UI must be checked in both themes
   before it ships. Theme selection lives in `src/theme/ThemeContext.tsx`
   (light / dark / system, persisted); never read `prefers-color-scheme`
   ad hoc in components.
 - **Exception:** the public TV display (`DisplayPage`) is always dark by
-  design (it's a broadcast screen) — it uses its own fixed tokens.
+  design (it's a broadcast screen) — it uses its own fixed tokens. The
+  landing hero board mock, the auth brand panel and the landing CTA reuse
+  that always-bottle treatment with scoped constants in `landing.css`.
 - **Icons are inline SVG** from `src/components/icons.tsx` (24×24 viewBox,
   `stroke="currentColor"`, `strokeWidth={1.8}`). Never emoji in chrome/UI;
   emoji are allowed only inside Telegram bot copy.

@@ -200,7 +200,11 @@ async def _send_ticket(
 ) -> None:
     event = await session.get(SaleEvent, ticket.event_id)
     branch = await session.get(Branch, ticket.branch_id) if ticket.branch_id else None
-    branch_line = t(lang, "branch_line", branch=branch.name) + "\n" if branch else ""
+    branch_line = ""
+    if branch is not None:
+        # the address tells the client where to actually show up
+        where = f"{branch.name} ({branch.address})" if branch.address else branch.name
+        branch_line = t(lang, "branch_line", branch=where) + "\n"
     caption = t(
         lang,
         "ticket_caption",

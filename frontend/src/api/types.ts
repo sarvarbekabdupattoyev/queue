@@ -197,6 +197,54 @@ export interface ActionResponse {
   ticket: Ticket | null
 }
 
+export interface StatsDaily {
+  day: string
+  label: string
+  registered: number
+  arrived: number
+  served: number
+}
+
+export interface StatsEventRow {
+  id: number
+  name: string
+  // an event may run in several branches
+  branch_names: string[]
+  starts_at: string
+  registered: number
+  arrived: number
+  served: number
+  skipped: number
+}
+
+export interface StatsBranchRow {
+  id: number
+  name: string
+  events: number
+  registered: number
+  arrived: number
+  served: number
+}
+
+export interface StatsOverview {
+  days: number
+  totals: {
+    registered: number
+    arrived: number
+    served: number
+    skipped: number
+    cancelled: number
+    late: number
+    events: number
+  }
+  avg_wait_minutes: number | null
+  avg_service_minutes: number | null
+  daily: StatsDaily[]
+  hourly: { hour: number; registered: number }[]
+  events: StatsEventRow[]
+  branches: StatsBranchRow[]
+}
+
 export interface PublicTicket {
   number: number
   first_name: string
@@ -206,6 +254,7 @@ export interface PublicTicket {
   waiting_count: number
   desk_number: number | null
   branch_name: string | null
+  branch_address: string | null
   qr: string
   event: {
     name: string

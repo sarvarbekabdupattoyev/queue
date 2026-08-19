@@ -41,6 +41,8 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 - **Sale events** — many per company, each with its own dates (entered as Tashkent local time,
   24-hour), live phase (`registration → checkin → queue`), a branch multiselect and an
   unguessable public display link (`?branch=` pins a TV to one branch).
+- **Owner statistics** — `/api/stats/overview` aggregates for the dashboard charts: daily
+  registrations/arrivals, hourly load, recent events and per-branch breakdown.
 - **Up to 3 parallel Telegram bots per company** (aiogram): trilingual conversation —
   the client picks O'zbek / Русский / English on first `/start` (inline buttons, stored per
   chat, switchable from the menu) and everything, including queue notifications, follows that
@@ -193,7 +195,8 @@ Follow the order — the dashboard checklist walks through the same steps:
 | CRUD | `/api/branches` | owner (read: staff) | company branches |
 | CRUD | `/api/employees` (+ `/reset-password`) | owner | staff with generated passwords, per-branch |
 | CRUD | `/api/desks` | owner (read: staff) | manager desks, per-branch |
-| CRUD | `/api/events` (+ `/state`, `/tickets`, `/seed`) | owner (read: staff) | sale events |
+| CRUD | `/api/events` (+ `/state`, `/tickets`, `/seed`) | owner (read: staff) | sale events (`branch_ids` multiselect) |
+| GET | `/api/stats/overview?days=N` | owner | dashboard chart aggregates |
 | POST | `/api/queue/{event}/checkin` | staff | QR code or 4-digit number |
 | POST | `/api/queue/{event}/call` · `recall` · `serving` · `skip` · `done` · `cancel` | manager/owner | desk actions |
 | GET | `/api/public/display/{code}` · `/api/public/tickets/{code}` | public | TV board, client ticket |

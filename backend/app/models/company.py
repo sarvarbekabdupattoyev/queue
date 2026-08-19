@@ -45,6 +45,9 @@ class Company(Base):
     desks: Mapped[list["Desk"]] = relationship(  # noqa: F821
         back_populates="company", cascade="all, delete-orphan", order_by="Desk.number"
     )
+    branches: Mapped[list["Branch"]] = relationship(  # noqa: F821
+        back_populates="company", cascade="all, delete-orphan", order_by="Branch.name"
+    )
     events: Mapped[list["SaleEvent"]] = relationship(  # noqa: F821
         back_populates="company", cascade="all, delete-orphan"
     )

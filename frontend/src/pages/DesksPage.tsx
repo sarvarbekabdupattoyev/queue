@@ -2,12 +2,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { Branch, Desk, User } from '../api/types'
-import { IconPlus } from '../components/icons'
-import { ActionForm, Field, Modal, Spinner, useToast } from '../components/ui'
+import { IconDesk, IconPlus } from '../components/icons'
+import {
+  ActionForm,
+  EmptyState,
+  Field,
+  Modal,
+  Spinner,
+  useConfirm,
+  useToast,
+} from '../components/ui'
 
 export default function DesksPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
   const { data: desks, isLoading } = useQuery({
     queryKey: ['desks'],
     queryFn: () => api<Desk[]>('/desks'),
@@ -62,17 +71,14 @@ export default function DesksPage() {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <h1>Stollar</h1>
-          <div className="sub">
-            {hasBranches
-              ? 'Mijozlar shu stollarga chaqiriladi — har bir stolni filialga va menejerga biriktiring'
-              : 'Har bir menejer stoli — mijozlar shu stollarga chaqiriladi'}
-          </div>
-        </div>
-        <button className="btn" onClick={openNew}>
-          <IconPlus size={16} /> Stol qo‘shish
+      <div className="page-actions">
+        <span className="hint">
+          {hasBranches
+            ? 'Mijozlar shu stollarga chaqiriladi — har bir stolni filialga va menejerga biriktiring'
+            : 'Har bir menejer stoli — mijozlar shu stollarga chaqiriladi'}
+        </span>
+        <button className="btn push" onClick={openNew}>
+          <IconPlus size={15} /> Stol qo‘shish
         </button>
       </div>
 
@@ -80,7 +86,17 @@ export default function DesksPage() {
         {isLoading ? (
           <Spinner />
         ) : !desks?.length ? (
-          <div className="empty">Hozircha stollar yo‘q. Kamida bitta stol qo‘shing.</div>
+          <EmptyState
+            icon={IconDesk}
+            action={
+              <button className="btn" onClick={openNew}>
+                <IconPlus size={15} /> Stol qo‘shish
+              </button>
+            }
+          >
+            Hozircha stollar yo‘q. Kamida bitta stol qo‘shing — chaqirilgan mijozlar ekranda shu
+            stol raqamini ko‘radi.
+          </EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -104,18 +120,26 @@ export default function DesksPage() {
                     )}
                     <td className="muted">{desk.name || '—'}</td>
                     <td>{desk.manager_name ?? <span className="muted">biriktirilmagan</span>}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button className="btn ghost sm" onClick={() => openEdit(desk)}>
-                        Tahrirlash
-                      </button>{' '}
-                      <button
-                        className="btn danger-ghost sm"
-                        onClick={() => {
-                          if (window.confirm(`${desk.number}-stol o‘chirilsinmi?`)) remove.mutate(desk)
-                        }}
-                      >
-                        O‘chirish
-                      </button>
+                    <td>
+                      <span className="row-actions">
+                        <button className="btn ghost sm" onClick={() => openEdit(desk)}>
+                          Tahrirlash
+                        </button>
+                        <button
+                          className="btn danger-ghost sm"
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `${desk.number}-stol o‘chirilsinmi?`,
+                                description: 'Stolga biriktirilgan menejer boshqa stol tanlashi kerak bo‘ladi.',
+                              })
+                            )
+                              remove.mutate(desk)
+                          }}
+                        >
+                          O‘chirish
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))}

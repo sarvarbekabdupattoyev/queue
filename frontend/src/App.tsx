@@ -11,6 +11,7 @@ import EmployeesPage from './pages/EmployeesPage'
 import DesksPage from './pages/DesksPage'
 import EventsPage from './pages/EventsPage'
 import EventDetailPage from './pages/EventDetailPage'
+import StatsPage from './pages/StatsPage'
 import SettingsPage from './pages/SettingsPage'
 import ManagerPage from './pages/ManagerPage'
 import ScannerPage from './pages/ScannerPage'
@@ -83,6 +84,7 @@ export default function App() {
           ['/dashboard/events', <EventsPage />],
           ['/dashboard/events/:eventId', <EventDetailPage />],
           ['/dashboard/branches', <BranchesPage />],
+          ['/dashboard/stats', <StatsPage />],
           ['/dashboard/employees', <EmployeesPage />],
           ['/dashboard/desks', <DesksPage />],
           ['/dashboard/settings', <SettingsPage />],

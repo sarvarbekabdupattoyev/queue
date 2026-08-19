@@ -5,8 +5,8 @@ import { api } from '../api/client'
 import type { SaleEvent } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { ThemeToggle } from './ThemeToggle'
-import { IconCalendar, IconLogout, Wordmark } from './icons'
-import { EmptyState } from './ui'
+import { IconCalendar, IconLogout, Logo } from './icons'
+import { EmptyState, useConfirm } from './ui'
 
 /** Header + event picker used by the manager and scanner screens. */
 export function StaffShell({
@@ -25,6 +25,7 @@ export function StaffShell({
   children: (event: SaleEvent | null) => ReactNode
 }) {
   const { user, logout } = useAuth()
+  const confirm = useConfirm()
   const { data: events } = useQuery({
     queryKey: ['events'],
     queryFn: () => api<SaleEvent[]>('/events'),
@@ -43,25 +44,25 @@ export function StaffShell({
 
   return (
     <div className="staff-wrap">
-      <header className="page-head">
-        <div>
-          <div style={{ marginBottom: 10 }}>
-            <Wordmark size={24} />
-          </div>
-          <h1 style={{ fontSize: 20 }}>{title}</h1>
+      <header className="staff-head">
+        <Logo size={40} />
+        <div className="titles">
+          <h1>{title}</h1>
           <div className="sub">{subtitle}</div>
         </div>
-        <div className="head-actions">
+        <div className="controls">
           {openEvents.length > 0 && (
             <select
               className="input"
-              style={{ width: 'auto' }}
               value={eventId ?? ''}
               onChange={(e) => onEventChange(Number(e.target.value))}
               aria-label="Tadbir"
             >
               {openEvents.map((event) => (
                 <option key={event.id} value={event.id}>
+                  {event.branches.length
+                    ? `${event.branches.map((b) => b.name).join(', ')} · `
+                    : ''}
                   {event.name}
                 </option>
               ))}
@@ -74,7 +75,22 @@ export function StaffShell({
               Boshqaruv
             </Link>
           )}
-          <button className="icon-btn" title="Chiqish" aria-label="Chiqish" onClick={logout}>
+          <button
+            className="icon-btn"
+            title="Chiqish"
+            aria-label="Chiqish"
+            onClick={async () => {
+              if (
+                await confirm({
+                  title: 'Tizimdan chiqasizmi?',
+                  confirmLabel: 'Chiqish',
+                  tone: 'neutral',
+                  icon: IconLogout,
+                })
+              )
+                logout()
+            }}
+          >
             <IconLogout size={16} />
           </button>
         </div>

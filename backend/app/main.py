@@ -97,6 +97,7 @@ def create_app() -> FastAPI:
         events,
         public,
         queue,
+        stats,
         ws,
     )
 
@@ -106,8 +107,10 @@ def create_app() -> FastAPI:
         branches.router,
         employees.router,
         desks.router,
+        branches.router,
         events.router,
         queue.router,
+        stats.router,
         public.router,
         ws.router,
     ):

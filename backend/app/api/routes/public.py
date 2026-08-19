@@ -26,6 +26,7 @@ async def ticket_state(code: str, db: DbSession) -> dict:
     if ticket is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Navbat topilmadi")
     event = await db.get(SaleEvent, ticket.event_id)
+    # the ticket's own branch — one event may run in several
     branch = await db.get(Branch, ticket.branch_id) if ticket.branch_id else None
     position = await queue_service.position_of(db, ticket)
     desk_numbers = await queue_service.desk_numbers_for(db, [ticket])
@@ -39,11 +40,14 @@ async def ticket_state(code: str, db: DbSession) -> dict:
         "waiting_count": await queue_service.waiting_count(db, event.id, ticket.branch_id),
         "desk_number": desk_numbers.get(ticket.desk_id),
         "branch_name": branch.name if branch else None,
+        "branch_address": branch.address if branch else None,
         "qr": await qr_data_url_async(ticket.code),
         "event": {
             "name": event.name,
             "phase": event.phase().value,
             "starts_at": event.starts_at.isoformat(),
             "checkin_until": event.checkin_until.isoformat(),
+            "branch_name": branch.name if branch else None,
+            "branch_address": branch.address if branch else None,
         },
     }
