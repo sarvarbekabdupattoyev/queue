@@ -5,6 +5,28 @@ days: clients register via a company's Telegram bot and get a random 4-digit
 number + QR; on the sale day they check in until a deadline; then the queue
 runs ordered by **bot registration time among checked-in tickets only**.
 
+## MANDATORY git workflow — `dev` is where you work, `main` is production
+
+This repo has exactly two long-lived branches:
+
+- **`main` — production.** Only ever receives merges from `dev`, and only
+  code that is verified working. Never commit to `main` directly.
+- **`dev` — development.** All work happens here: features, fixes,
+  experiments.
+
+For EVERY change, without exception:
+
+1. `git checkout dev` (create it from `main` if it is missing) and commit
+   the work there. If you are asked to work on some other branch, treat that
+   branch as a stand-in for `dev` and still finish through step 2.
+2. When the work is done, run the full verification below. **Only if
+   everything passes** — backend tests green, frontend `tsc -b` and
+   `vite build` clean — merge `dev` into `main` and push both branches.
+   A red test or a broken build means `main` does not get the merge; fix it
+   on `dev` first.
+3. Never push work-in-progress, broken, or unverified code to `main`. Only
+   working files reach production.
+
 ## MANDATORY workflow — read the rules before you code
 
 Before implementing ANY request in this repo:
@@ -39,6 +61,13 @@ cd backend && python3 -m pytest tests/ -q          # must be all green
 cd frontend && npx tsc -b && npx vite build        # must be clean
 # optional: re-run backend suite on Postgres:
 # TEST_DATABASE_URL=postgresql+asyncpg://... python3 -m pytest tests/ -q
+```
+
+Then, and only when all of it passes, ship `dev` to production:
+
+```bash
+git checkout main && git merge --ff-only dev && git push origin main
+git checkout dev  && git push origin dev
 ```
 
 ## Domain invariants (never break these)
