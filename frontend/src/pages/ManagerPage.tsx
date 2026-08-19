@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, getToken, wsUrl } from '../api/client'
 import type { Desk, StaffState, ActionResponse } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
@@ -10,9 +10,11 @@ import {
   IconFlag,
   IconMegaphone,
   IconSkip,
+  IconSound,
 } from '../components/icons'
 import { useConfirm, useToast } from '../components/ui'
 import { formatCountdown, formatLongCountdown } from '../lib/format'
+import { useCallSound } from '../lib/useCallSound'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
 export default function ManagerPage() {
@@ -64,6 +66,33 @@ export default function ManagerPage() {
   )
 
   const desk = desks.find((d) => d.id === deskId) ?? null
+  const { enabled: soundOn, toggle: toggleSound, play: playCallSound } = useCallSound(true)
+  // ring loudly whenever a client is (re)called in this desk's scope — the
+  // clip fires on fresh `called_at` stamps, never on the first snapshot
+  const knownCallsRef = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    // switching desks changes the scope — re-baseline instead of ringing
+    // for calls that were already active there
+    knownCallsRef.current = null
+  }, [deskId])
+  useEffect(() => {
+    if (!state) return
+    const scope = (state.event.branches?.length ?? 0) > 0 ? (desk?.branch_id ?? null) : null
+    const current = new Set(
+      (state.active ?? [])
+        .filter((t) => t.status === 'called' && (scope === null || t.branch_id === scope))
+        .map((t) => `${t.id}:${t.called_at}`),
+    )
+    const previous = knownCallsRef.current
+    knownCallsRef.current = current
+    if (previous === null) return
+    for (const key of current) {
+      if (!previous.has(key)) {
+        playCallSound()
+        break
+      }
+    }
+  }, [state, desk, playCallSound])
   const mine = useMemo(
     () => state?.active?.find((t) => t.desk_id === deskId) ?? null,
     [state, deskId],
@@ -108,24 +137,36 @@ export default function ManagerPage() {
       eventId={eventId}
       onEventChange={selectEvent}
       extra={
-        <select
-          className="input"
-          style={{ width: 'auto' }}
-          value={deskId ?? ''}
-          onChange={(e) => selectDesk(Number(e.target.value))}
-          aria-label="Stol"
-        >
-          {desks.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.branch_name ? `${d.branch_name} · ` : ''}
-              {d.number}-stol{d.manager_id === user?.id ? ' (mening)' : ''}
-            </option>
-          ))}
-        </select>
+        <>
+          <select
+            className="input"
+            style={{ width: 'auto' }}
+            value={deskId ?? ''}
+            onChange={(e) => selectDesk(Number(e.target.value))}
+            aria-label="Stol"
+          >
+            {desks.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.branch_name ? `${d.branch_name} · ` : ''}
+                {d.number}-stol{d.manager_id === user?.id ? ' (mening)' : ''}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={`icon-btn${soundOn ? ' on' : ''}`}
+            title={soundOn ? 'Chaqiruv ovozi yoniq' : 'Chaqiruv ovozi o‘chiq'}
+            aria-label="Chaqiruv ovozi"
+            aria-pressed={soundOn}
+            onClick={toggleSound}
+          >
+            <IconSound size={16} />
+          </button>
+        </>
       }
     >
       {() => (
-        <div className="grid-2" style={{ gridTemplateColumns: '1.2fr 1fr', alignItems: 'start' }}>
+        <div className="grid-2 split">
           <div>
             <div className="card">
               <div className="card-title">

@@ -156,7 +156,8 @@ export default function EmployeesPage() {
             Hozircha xodimlar yo‘q. Menejer yoki QR skaner qo‘shing — parol avtomatik yaratiladi.
           </EmptyState>
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="table-wrap only-desktop">
             <table className="table">
               <thead>
                 <tr>
@@ -245,6 +246,81 @@ export default function EmployeesPage() {
               </tbody>
             </table>
           </div>
+
+          <div className="stack-list only-mobile">
+            {employees.map((employee) => (
+              <div className="stack-item" key={employee.id}>
+                <span className="top">
+                  <span style={{ minWidth: 0 }}>
+                    <span className="cell-main">
+                      {employee.first_name} {employee.last_name}
+                    </span>
+                    <span className="cell-sub">{prettyPhone(employee.phone)}</span>
+                  </span>
+                  <span style={{ display: 'inline-flex', gap: 6, flex: '0 0 auto' }}>
+                    <span className={`badge ${employee.role === 'manager' ? 'blue' : 'teal'}`}>
+                      {ROLE_LABEL[employee.role]}
+                    </span>
+                    <span className={`badge ${employee.is_active ? 'teal' : 'dim'}`}>
+                      {employee.is_active ? 'Faol' : 'Bloklangan'}
+                    </span>
+                  </span>
+                </span>
+                {hasBranches && (
+                  <select
+                    className="input"
+                    style={{ marginTop: 10 }}
+                    aria-label={`${employee.first_name} filiali`}
+                    value={employee.branch_id ?? ''}
+                    disabled={setBranch.isPending}
+                    onChange={(e) =>
+                      setBranch.mutate({
+                        employee,
+                        branchId: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                  >
+                    <option value="">Barcha filiallar</option>
+                    {(branches ?? []).map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <span className="foot" style={{ justifyContent: 'flex-start' }}>
+                  <button className="btn ghost sm" onClick={() => openEdit(employee)}>
+                    Tahrirlash
+                  </button>
+                  <button
+                    className="btn ghost sm"
+                    onClick={() => resetPassword.mutate(employee)}
+                    disabled={resetPassword.isPending}
+                  >
+                    Parolni yangilash
+                  </button>
+                  <button className="btn ghost sm" onClick={() => toggleActive.mutate(employee)}>
+                    {employee.is_active ? 'Bloklash' : 'Faollashtirish'}
+                  </button>
+                  <button
+                    className="btn danger-ghost sm"
+                    onClick={async () => {
+                      if (
+                        await confirm({
+                          title: `${employee.first_name} o‘chirilsinmi?`,
+                          description: 'Xodim tizimga kira olmaydi. Bu amalni qaytarib bo‘lmaydi.',
+                        })
+                      )
+                        remove.mutate(employee)
+                    }}
+                  >
+                    O‘chirish
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+          </>
         )}
       </div>
 

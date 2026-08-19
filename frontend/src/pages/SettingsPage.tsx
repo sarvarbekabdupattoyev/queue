@@ -211,9 +211,10 @@ export default function SettingsPage() {
           >
             {(busy, error) => (
               <div style={{ marginTop: 12 }}>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <input
                     className="input"
+                    style={{ flex: '1 1 150px', width: 'auto' }}
                     value={phoneForm.phone}
                     onChange={(e) => setPhoneForm((f) => ({ ...f, phone: e.target.value }))}
                     placeholder="+998 71 200 50 50"
@@ -221,6 +222,7 @@ export default function SettingsPage() {
                   />
                   <input
                     className="input"
+                    style={{ flex: '1 1 130px', width: 'auto' }}
                     value={phoneForm.label}
                     onChange={(e) => setPhoneForm((f) => ({ ...f, label: e.target.value }))}
                     placeholder="Izoh (Call-markaz)"

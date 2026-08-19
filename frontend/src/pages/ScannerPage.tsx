@@ -5,7 +5,7 @@ import type { CheckinResponse, StaffState } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { StaffShell } from '../components/StaffShell'
 import { WalkinModal } from '../components/WalkinModal'
-import { IconCamera, IconMapPin, IconPlus } from '../components/icons'
+import { IconCamera, IconCheck, IconMapPin, IconPlus, IconX } from '../components/icons'
 import { formatLongCountdown, formatTime } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
@@ -24,6 +24,9 @@ function resultTone(kind: ScanRecord['kind']): string {
   return 'err'
 }
 
+/** How long the full-screen verdict stays over the camera image. */
+const FLASH_MS = 1800
+
 export default function ScannerPage() {
   const { user } = useAuth()
   const now = useTick()
@@ -38,6 +41,7 @@ export default function ScannerPage() {
 
   const [input, setInput] = useState('')
   const [last, setLast] = useState<ScanRecord | null>(null)
+  const [flash, setFlash] = useState<ScanRecord | null>(null)
   const [history, setHistory] = useState<ScanRecord[]>([])
   const [addingWalkin, setAddingWalkin] = useState(false)
   const [cameraOn, setCameraOn] = useState(false)
@@ -47,11 +51,49 @@ export default function ScannerPage() {
   const streamRef = useRef<MediaStream | null>(null)
   const lastCodeRef = useRef<{ code: string; at: number }>({ code: '', at: 0 })
   const busyRef = useRef(false)
+  const flashTimer = useRef<number>()
+  const audioCtxRef = useRef<AudioContext | null>(null)
 
   const { state } = useLiveState<StaffState>(
     eventId ? wsUrl(`/ws/staff/${eventId}?token=${getToken()}`) : null,
     eventId ? () => api<StaffState>(`/events/${eventId}/state`) : null,
   )
+
+  // every scan answers with sound + vibration + a visual verdict, so the
+  // operator (and the client at the desk) never has to guess whether the QR
+  // was accepted, sent to the end-of-day group, or refused
+  const announceResult = useCallback((record: ScanRecord) => {
+    const tone = resultTone(record.kind)
+    try {
+      audioCtxRef.current = audioCtxRef.current ?? new AudioContext()
+      const ctx = audioCtxRef.current
+      void ctx.resume().catch(() => {})
+      const t0 = ctx.currentTime
+      const tones: [number, number, number][] =
+        tone === 'err' ? [[220, 0, 0.3]] : [[880, 0, 0.1], [1318, 0.1, 0.18]]
+      for (const [freq, dt, dur] of tones) {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = tone === 'err' ? 'square' : 'sine'
+        osc.frequency.value = freq
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        gain.gain.setValueAtTime(0.0001, t0 + dt)
+        gain.gain.exponentialRampToValueAtTime(0.5, t0 + dt + 0.01)
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + dur)
+        osc.start(t0 + dt)
+        osc.stop(t0 + dt + dur + 0.05)
+      }
+    } catch {
+      /* audio unavailable — the visual verdict still shows */
+    }
+    if ('vibrate' in navigator) navigator.vibrate(tone === 'err' ? [160, 70, 160] : 90)
+    setFlash(record)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlash(null), FLASH_MS)
+  }, [])
+
+  useEffect(() => () => window.clearTimeout(flashTimer.current), [])
 
   const submit = useCallback(
     async (raw: string) => {
@@ -72,6 +114,7 @@ export default function ScannerPage() {
         }
         setLast(record)
         setHistory((h) => [record, ...h].slice(0, 12))
+        announceResult(record)
       } catch (e) {
         const record: ScanRecord = {
           at: Date.now(),
@@ -80,13 +123,14 @@ export default function ScannerPage() {
         }
         setLast(record)
         setHistory((h) => [record, ...h].slice(0, 12))
+        announceResult(record)
       } finally {
         busyRef.current = false
         setInput('')
         inputRef.current?.focus()
       }
     },
-    [eventId],
+    [eventId, announceResult],
   )
 
   // camera scanning loop (BarcodeDetector-free, pure jsQR)
@@ -218,7 +262,35 @@ export default function ScannerPage() {
               <div style={{ marginTop: 12 }}>
                 {cameraOn ? (
                   <>
-                    <video ref={videoRef} className="scan-video" muted playsInline />
+                    <div className="scan-stage">
+                      <video ref={videoRef} className="scan-video" muted playsInline />
+                      <span className="scan-frame" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                      {!flash && <span className="scan-line" aria-hidden="true" />}
+                      {!flash && (
+                        <span className="scan-live">
+                          <span className="dot" /> Kamera faol — QR ko‘rsating
+                        </span>
+                      )}
+                      {flash && (
+                        <div className={`scan-flash ${resultTone(flash.kind)}`} role="status">
+                          <span className="scan-flash-icon">
+                            {resultTone(flash.kind) === 'err' ? (
+                              <IconX size={34} />
+                            ) : (
+                              <IconCheck size={34} />
+                            )}
+                          </span>
+                          {flash.number && <span className="scan-flash-code">№{flash.number}</span>}
+                          {flash.name && <span className="scan-flash-name">{flash.name}</span>}
+                          <span className="scan-flash-msg">{flash.message}</span>
+                        </div>
+                      )}
+                    </div>
                     <button className="btn ghost full" style={{ marginTop: 8 }} onClick={() => setCameraOn(false)}>
                       Kamerani o‘chirish
                     </button>
@@ -247,7 +319,7 @@ export default function ScannerPage() {
           </div>
 
           <div>
-            <div className={`scan-result ${last ? resultTone(last.kind) : ''}`}>
+            <div key={last?.at ?? 'empty'} className={`scan-result ${last ? resultTone(last.kind) : ''}`}>
               {last ? (
                 <>
                   <div className="big">{last.number ? `№${last.number}` : '—'}</div>

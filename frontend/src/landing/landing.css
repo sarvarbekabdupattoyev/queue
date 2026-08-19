@@ -27,6 +27,14 @@
 .landing-nav-links a:hover { color: var(--text); background: var(--accent-tint); text-decoration: none; }
 .landing-nav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 @media (max-width: 860px) { .landing-nav-links { display: none; } }
+/* small phones: keep the fixed bar on one row — logo mark, compact controls,
+   one primary CTA (login stays reachable from the register page) */
+@media (max-width: 640px) {
+  .landing-nav-inner { gap: 10px; height: 56px; }
+  .landing-nav-inner .wordmark-text { display: none; }
+  .landing-nav-actions { gap: 6px; }
+}
+@media (max-width: 460px) { .landing-nav-actions > a.btn.ghost { display: none; } }
 
 /* ---------------- hero ---------------- */
 .landing-hero { position: relative; padding: 150px 0 84px; }

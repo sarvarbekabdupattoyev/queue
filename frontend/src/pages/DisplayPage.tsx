@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { wsUrl } from '../api/client'
 import { IconExpand, IconSound } from '../components/icons'
 import type { PublicState } from '../api/types'
 import { UZ_DAYS, UZ_MONTHS, formatCountdown, formatLongCountdown, formatTimeMs } from '../lib/format'
+import { useCallSound } from '../lib/useCallSound'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
 async function fetchState(displayCode: string): Promise<PublicState> {
@@ -44,37 +45,13 @@ export default function DisplayPage() {
     displayCode ? wsUrl(`/ws/display/${displayCode}`) : null,
     displayCode ? () => fetchState(displayCode) : null,
   )
-  const [soundOn, setSoundOn] = useState(false)
+  // the loud announcement clip (shared with the manager panel); TVs keep
+  // their own persisted on/off choice
+  const { enabled: soundOn, toggle: toggleSound, play: playCallSound } = useCallSound(false, 'sn_display_sound')
   const knownCalls = useRef<Set<string>>(new Set())
-  const audioContext = useRef<AudioContext | null>(null)
+  const sawFirstState = useRef(false)
 
-  const chime = () => {
-    try {
-      audioContext.current = audioContext.current ?? new AudioContext()
-      const ctx = audioContext.current
-      const t0 = ctx.currentTime
-      ;[
-        [880, 0],
-        [660, 0.18],
-      ].forEach(([freq, dt]) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.type = 'sine'
-        osc.frequency.value = freq
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        gain.gain.setValueAtTime(0.0001, t0 + dt)
-        gain.gain.exponentialRampToValueAtTime(0.4, t0 + dt + 0.02)
-        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.55)
-        osc.start(t0 + dt)
-        osc.stop(t0 + dt + 0.6)
-      })
-    } catch {
-      /* audio unavailable */
-    }
-  }
-
-  // fresh-call detection for pulse + chime
+  // fresh-call detection for pulse + sound
   const freshKeys = useMemo(() => {
     if (!state) return new Set<string>()
     const fresh = new Set<string>()
@@ -88,7 +65,13 @@ export default function DisplayPage() {
   }, [state])
 
   useEffect(() => {
-    if (freshKeys.size > 0 && soundOn) chime()
+    if (!state) return
+    // never ring for the calls that were already on screen when the TV loaded
+    if (!sawFirstState.current) {
+      sawFirstState.current = true
+      return
+    }
+    if (freshKeys.size > 0) playCallSound()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [freshKeys])
 
@@ -290,13 +273,7 @@ export default function DisplayPage() {
           oxirida qabul qilinadi
         </div>
         <div style={{ display: 'flex', gap: '0.6vw' }}>
-          <button
-            className={`btn ghost sm${soundOn ? ' on' : ''}`}
-            onClick={() => {
-              setSoundOn((s) => !s)
-              if (!soundOn) chime()
-            }}
-          >
+          <button className={`btn ghost sm${soundOn ? ' on' : ''}`} onClick={toggleSound}>
             <IconSound size={15} /> Ovoz
           </button>
           <button className="btn ghost sm" onClick={toggleFullscreen}>

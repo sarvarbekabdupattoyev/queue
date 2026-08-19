@@ -345,7 +345,8 @@ export default function EventDetailPage() {
         ) : !ticketsQuery.data?.length ? (
           <div className="empty">Mijozlar topilmadi. Bot orqali ro‘yxatdan o‘tishlarini kuting.</div>
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="table-wrap only-desktop">
             <table className="table">
               <thead>
                 <tr>
@@ -410,6 +411,59 @@ export default function EventDetailPage() {
               </tbody>
             </table>
           </div>
+
+          <div className="stack-list only-mobile">
+            {ticketsQuery.data.map((ticket) => {
+              const label = STATUS_LABEL[ticket.status]
+              return (
+                <div className="stack-item" key={ticket.id}>
+                  <span className="top">
+                    <span style={{ minWidth: 0 }}>
+                      <span className="cell-main">
+                        <span className="mono">{ticket.number}</span> · {ticket.first_name}{' '}
+                        {ticket.last_name}
+                      </span>
+                      <span className="cell-sub">
+                        {prettyPhone(ticket.phone)} · {formatDateTime(ticket.registered_at)}
+                        {hasBranches && ticket.branch_name ? ` · ${ticket.branch_name}` : ''}
+                      </span>
+                    </span>
+                    <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <span className={`badge ${label.tone}`}>{label.text}</span>
+                      {ticket.late && <span className="badge amber">kun oxiri</span>}
+                    </span>
+                  </span>
+                  {!['done', 'cancelled'].includes(ticket.status) && (
+                    <span className="foot" style={{ justifyContent: 'flex-start' }}>
+                      {(ticket.status === 'registered' || ticket.status === 'skipped') && (
+                        <button className="btn ghost sm" onClick={() => checkin.mutate(ticket.number)}>
+                          Keldi
+                        </button>
+                      )}
+                      {!['done', 'cancelled'].includes(ticket.status) && (
+                        <button
+                          className="btn danger-ghost sm"
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `№${ticket.number} bekor qilinsinmi?`,
+                                description: `${ticket.first_name} ${ticket.last_name} navbatdan chiqariladi va botda xabar oladi.`,
+                                confirmLabel: 'Bekor qilish',
+                              })
+                            )
+                              cancelTicket.mutate(ticket.number)
+                          }}
+                        >
+                          Bekor
+                        </button>
+                      )}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          </>
         )}
       </div>
 
