@@ -5,10 +5,19 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.models.enums import EventPhase, TicketSource, TicketStatus
 
 
+class EventBranchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
 class EventCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     starts_at: datetime
     checkin_until: datetime
+    # one event can run in several branches at once (multiselect)
+    branch_ids: list[int] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def _check_window(self) -> "EventCreate":
@@ -24,6 +33,8 @@ class EventUpdate(BaseModel):
     starts_at: datetime | None = None
     checkin_until: datetime | None = None
     is_active: bool | None = None
+    # None = unchanged; a list replaces the branch set
+    branch_ids: list[int] | None = Field(default=None, max_length=50)
 
 
 class EventOut(BaseModel):
@@ -36,6 +47,7 @@ class EventOut(BaseModel):
     is_active: bool
     display_code: str
     phase: EventPhase
+    branches: list[EventBranchOut] = []
     ticket_count: int = 0
     checked_in_count: int = 0
 
@@ -52,6 +64,8 @@ class TicketOut(BaseModel):
     status: TicketStatus
     late: bool
     source: TicketSource
+    branch_id: int | None = None
+    branch_name: str | None = None
     registered_at: datetime
     checked_in_at: datetime | None
     called_at: datetime | None

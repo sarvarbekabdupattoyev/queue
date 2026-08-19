@@ -2,8 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import String, cast, func, or_, select
 
 from app.api.deps import CompanyEvent, DbSession, OwnCompany, require_roles
-from app.models import Desk, SaleEvent, Ticket, TicketSource, TicketStatus, UserRole
-from app.schemas.event import EventCreate, EventOut, EventUpdate, SeedRequest, TicketOut
+from app.models import (
+    Branch,
+    Desk,
+    SaleEvent,
+    Ticket,
+    TicketSource,
+    TicketStatus,
+    UserRole,
+)
+from app.schemas.event import (
+    EventBranchOut,
+    EventCreate,
+    EventOut,
+    EventUpdate,
+    SeedRequest,
+    TicketOut,
+)
 from app.services import queue_service, ticket_service
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -41,9 +56,26 @@ async def _event_out(db: DbSession, event: SaleEvent) -> EventOut:
         is_active=event.is_active,
         display_code=event.display_code,
         phase=event.phase(),
+        branches=[EventBranchOut.model_validate(b) for b in event.branches],
         ticket_count=total,
         checked_in_count=checked_in,
     )
+
+
+async def _load_branches(db: DbSession, company_id: int, branch_ids: list[int]) -> list[Branch]:
+    """Resolve requested branch ids to this company's branches (order kept)."""
+    unique_ids = list(dict.fromkeys(branch_ids))
+    if not unique_ids:
+        return []
+    branches = (
+        await db.scalars(
+            select(Branch).where(Branch.company_id == company_id, Branch.id.in_(unique_ids))
+        )
+    ).all()
+    if len(branches) != len(unique_ids):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filial topilmadi")
+    by_id = {b.id: b for b in branches}
+    return [by_id[i] for i in unique_ids]
 
 
 def _ticket_out(ticket: Ticket, desk_numbers: dict[int, int], position: int | None = None) -> TicketOut:
@@ -67,11 +99,13 @@ async def list_events(db: DbSession, company: OwnCompany) -> list[EventOut]:
 
 @router.post("", response_model=EventOut, status_code=status.HTTP_201_CREATED, dependencies=[OwnerOnly])
 async def create_event(payload: EventCreate, db: DbSession, company: OwnCompany) -> EventOut:
+    branches = await _load_branches(db, company.id, payload.branch_ids)
     event = SaleEvent(
         company_id=company.id,
         name=payload.name.strip(),
         starts_at=payload.starts_at,
         checkin_until=payload.checkin_until,
+        branches=branches,
     )
     db.add(event)
     await db.commit()
@@ -104,6 +138,29 @@ async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent)
         )
     if payload.is_active is not None:
         event.is_active = payload.is_active
+    if payload.branch_ids is not None:
+        branches = await _load_branches(db, event.company_id, payload.branch_ids)
+        # a branch that already holds tickets owns a slice of the queue —
+        # removing it would strand those clients
+        kept = {b.id for b in branches}
+        removed = [b.id for b in event.branches if b.id not in kept]
+        if removed:
+            has_tickets = await db.scalar(
+                select(Ticket.id)
+                .where(
+                    Ticket.event_id == event.id,
+                    Ticket.branch_id.in_(removed),
+                    Ticket.status != TicketStatus.CANCELLED,
+                )
+                .limit(1)
+            )
+            if has_tickets is not None:
+                await db.rollback()
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Navbatlari bor filialni tadbirdan chiqarib bo'lmaydi",
+                )
+        event.branches = branches
     await db.commit()
     await db.refresh(event)
     queue_service.schedule_event_broadcast(event.id)
@@ -127,6 +184,7 @@ async def list_tickets(
     event: CompanyEvent,
     q: str | None = None,
     ticket_status: TicketStatus | None = None,
+    branch_id: int | None = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[TicketOut]:
@@ -143,6 +201,8 @@ async def list_tickets(
         )
     if ticket_status is not None:
         stmt = stmt.where(Ticket.status == ticket_status)
+    if branch_id is not None:
+        stmt = stmt.where(Ticket.branch_id == branch_id)
     stmt = stmt.order_by(Ticket.registered_at.desc()).limit(min(limit, 500)).offset(offset)
     tickets = (await db.scalars(stmt)).all()
     desk_ids = {t.desk_id for t in tickets if t.desk_id}
@@ -150,16 +210,25 @@ async def list_tickets(
     if desk_ids:
         rows = (await db.execute(select(Desk.id, Desk.number).where(Desk.id.in_(desk_ids)))).all()
         desk_numbers = dict(rows)
-    return [_ticket_out(t, desk_numbers) for t in tickets]
+    branch_names = {b.id: b.name for b in event.branches}
+    out = []
+    for t in tickets:
+        item = _ticket_out(t, desk_numbers)
+        item.branch_name = branch_names.get(t.branch_id) if t.branch_id else None
+        out.append(item)
+    return out
 
 
 @router.post("/{event_id}/seed", response_model=list[TicketOut], dependencies=[OwnerOnly])
 async def seed_tickets(
     payload: SeedRequest, db: DbSession, event: CompanyEvent
 ) -> list[TicketOut]:
-    """Create fake registered tickets for demos and rehearsals."""
+    """Create fake registered tickets for demos and rehearsals. Branch events
+    get the fakes spread round-robin across their branches."""
     import secrets as _secrets
 
+    event_id = event.id
+    branch_ids = event.branch_ids()
     made: list[Ticket] = []
     for i in range(payload.count):
         first, last = SEED_NAMES[i % len(SEED_NAMES)]
@@ -168,10 +237,11 @@ async def seed_tickets(
             ticket = await ticket_service.create_ticket(
                 db, event,
                 first_name=first, last_name=last, phone=phone,
+                branch_id=branch_ids[i % len(branch_ids)] if branch_ids else None,
                 source=TicketSource.SEED,
             )
         except Exception:
             continue
         made.append(ticket)
-    queue_service.schedule_event_broadcast(event.id)
+    queue_service.schedule_event_broadcast(event_id)
     return [_ticket_out(t, {}) for t in made]

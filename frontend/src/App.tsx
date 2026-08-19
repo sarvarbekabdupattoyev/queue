@@ -6,6 +6,7 @@ import { DashboardLayout } from './components/DashboardLayout'
 import type { Role } from './api/types'
 import OnboardingPage from './pages/OnboardingPage'
 import DashboardHome from './pages/DashboardHome'
+import BranchesPage from './pages/BranchesPage'
 import EmployeesPage from './pages/EmployeesPage'
 import DesksPage from './pages/DesksPage'
 import EventsPage from './pages/EventsPage'
@@ -81,6 +82,7 @@ export default function App() {
           ['/dashboard', <DashboardHome />],
           ['/dashboard/events', <EventsPage />],
           ['/dashboard/events/:eventId', <EventDetailPage />],
+          ['/dashboard/branches', <BranchesPage />],
           ['/dashboard/employees', <EmployeesPage />],
           ['/dashboard/desks', <DesksPage />],
           ['/dashboard/settings', <SettingsPage />],

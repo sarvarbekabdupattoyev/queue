@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, OwnCompany, require_roles
 from app.core.security import generate_password, hash_password_async
-from app.models import User, UserRole
+from app.models import Branch, User, UserRole
 from app.schemas.auth import UserOut
 from app.schemas.staff import EmployeeCreate, EmployeeUpdate, EmployeeWithPassword
 
@@ -12,6 +12,12 @@ router = APIRouter(
 )
 
 EMPLOYEE_ROLES = (UserRole.MANAGER, UserRole.SCANNER)
+
+
+async def _validate_branch(db: DbSession, company_id: int, branch_id: int) -> None:
+    branch = await db.get(Branch, branch_id)
+    if branch is None or branch.company_id != company_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filial topilmadi")
 
 
 async def _get_employee(db: DbSession, company_id: int, employee_id: int) -> User:
@@ -45,6 +51,8 @@ async def create_employee(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Xodim roli faqat 'manager' yoki 'scanner' bo'ladi"
         )
+    if payload.branch_id is not None:
+        await _validate_branch(db, company.id, payload.branch_id)
     existing = await db.scalar(select(User.id).where(User.phone == payload.phone))
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam allaqachon ro'yxatdan o'tgan")
@@ -56,6 +64,7 @@ async def create_employee(
         last_name=payload.last_name.strip(),
         role=payload.role,
         company_id=company.id,
+        branch_id=payload.branch_id,
     )
     db.add(employee)
     await db.commit()
@@ -81,6 +90,11 @@ async def update_employee(
         employee.last_name = payload.last_name.strip()
     if payload.is_active is not None:
         employee.is_active = payload.is_active
+    if payload.clear_branch:
+        employee.branch_id = None
+    elif payload.branch_id is not None:
+        await _validate_branch(db, company.id, payload.branch_id)
+        employee.branch_id = payload.branch_id
     await db.commit()
     await db.refresh(employee)
     return UserOut.model_validate(employee)

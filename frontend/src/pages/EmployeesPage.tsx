@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
-import type { EmployeeWithPassword, Role, User } from '../api/types'
+import type { Branch, EmployeeWithPassword, Role, User } from '../api/types'
 import { IconPlus } from '../components/icons'
 import { ActionForm, CopyButton, Field, Modal, Spinner, useToast } from '../components/ui'
 import { prettyPhone } from '../lib/format'
@@ -48,12 +48,35 @@ export default function EmployeesPage() {
     queryKey: ['employees'],
     queryFn: () => api<User[]>('/employees'),
   })
+  const { data: branches } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => api<Branch[]>('/branches'),
+  })
+  const hasBranches = (branches?.length ?? 0) > 0
   const [creating, setCreating] = useState(false)
   const [reveal, setReveal] = useState<EmployeeWithPassword | null>(null)
-  const [form, setForm] = useState({ first_name: '', last_name: '', phone: '+998', role: 'manager' as Role })
+  const [form, setForm] = useState({
+    first_name: '',
+    last_name: '',
+    phone: '+998',
+    role: 'manager' as Role,
+    branch_id: '',
+  })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['employees'] })
 
+  const setBranch = useMutation({
+    mutationFn: ({ employee, branchId }: { employee: User; branchId: number | null }) =>
+      api<User>(`/employees/${employee.id}`, {
+        method: 'PATCH',
+        body: branchId === null ? { clear_branch: true } : { branch_id: branchId },
+      }),
+    onSuccess: () => {
+      invalidate()
+      queryClient.invalidateQueries({ queryKey: ['branches'] })
+    },
+    onError: (e: Error) => toast(e.message, true),
+  })
   const toggleActive = useMutation({
     mutationFn: (employee: User) =>
       api<User>(`/employees/${employee.id}`, {
@@ -83,7 +106,11 @@ export default function EmployeesPage() {
       <div className="page-head">
         <div>
           <h1>Xodimlar</h1>
-          <div className="sub">Menejerlar stollarda mijoz chaqiradi, skanerlar qabulxonada QR o‘qiydi</div>
+          <div className="sub">
+            {hasBranches
+              ? 'Menejerlar stollarda mijoz chaqiradi, skanerlar QR o‘qiydi — har bir filialga o‘z xodimlarini biriktiring'
+              : 'Menejerlar stollarda mijoz chaqiradi, skanerlar qabulxonada QR o‘qiydi'}
+          </div>
         </div>
         <button className="btn" onClick={() => setCreating(true)}>
           <IconPlus size={16} /> Xodim qo‘shish
@@ -105,6 +132,7 @@ export default function EmployeesPage() {
                   <th>Ism</th>
                   <th>Telefon</th>
                   <th>Rol</th>
+                  {hasBranches && <th>Filial</th>}
                   <th>Holat</th>
                   <th></th>
                 </tr>
@@ -121,6 +149,30 @@ export default function EmployeesPage() {
                         {ROLE_LABEL[employee.role]}
                       </span>
                     </td>
+                    {hasBranches && (
+                      <td>
+                        <select
+                          className="input"
+                          style={{ width: 'auto', minWidth: 140 }}
+                          aria-label={`${employee.first_name} filiali`}
+                          value={employee.branch_id ?? ''}
+                          disabled={setBranch.isPending}
+                          onChange={(e) =>
+                            setBranch.mutate({
+                              employee,
+                              branchId: e.target.value ? Number(e.target.value) : null,
+                            })
+                          }
+                        >
+                          <option value="">Barcha filiallar</option>
+                          {(branches ?? []).map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    )}
                     <td>
                       <span className={`badge ${employee.is_active ? 'teal' : 'dim'}`}>
                         {employee.is_active ? 'Faol' : 'Bloklangan'}
@@ -158,11 +210,20 @@ export default function EmployeesPage() {
         <Modal title="Yangi xodim" onClose={() => setCreating(false)}>
           <ActionForm
             onSubmit={async () => {
-              const created = await api<EmployeeWithPassword>('/employees', { body: form })
+              const created = await api<EmployeeWithPassword>('/employees', {
+                body: {
+                  first_name: form.first_name,
+                  last_name: form.last_name,
+                  phone: form.phone,
+                  role: form.role,
+                  branch_id: form.branch_id ? Number(form.branch_id) : null,
+                },
+              })
               setCreating(false)
-              setForm({ first_name: '', last_name: '', phone: '+998', role: 'manager' })
+              setForm({ first_name: '', last_name: '', phone: '+998', role: 'manager', branch_id: '' })
               setReveal(created)
               invalidate()
+              queryClient.invalidateQueries({ queryKey: ['branches'] })
             }}
           >
             {(busy, error) => (
@@ -201,6 +262,22 @@ export default function EmployeesPage() {
                     <option value="scanner">QR skaner (qabulxonada belgilaydi)</option>
                   </select>
                 </Field>
+                {hasBranches && (
+                  <Field label="Filial">
+                    <select
+                      className="input"
+                      value={form.branch_id}
+                      onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value }))}
+                    >
+                      <option value="">Barcha filiallar</option>
+                      {(branches ?? []).map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
                 <p className="hint">Parol avtomatik yaratiladi va bir marta ko‘rsatiladi.</p>
                 {error && <div className="error-text">{error}</div>}
                 <div className="modal-actions">

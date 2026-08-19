@@ -25,6 +25,7 @@ export default function EventDetailPage() {
   const now = useTick()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
 
   const { data: event } = useQuery({
     queryKey: ['event', eventId],
@@ -35,12 +36,12 @@ export default function EventDetailPage() {
     eventId ? () => api<StaffState>(`/events/${eventId}/state`) : null,
   )
   const ticketsQuery = useQuery({
-    queryKey: ['tickets', eventId, search, statusFilter],
+    queryKey: ['tickets', eventId, search, statusFilter, branchFilter],
     queryFn: () =>
       api<Ticket[]>(
         `/events/${eventId}/tickets?q=${encodeURIComponent(search)}${
           statusFilter ? `&ticket_status=${statusFilter}` : ''
-        }`,
+        }${branchFilter ? `&branch_id=${branchFilter}` : ''}`,
       ),
     enabled: !!eventId,
     refetchInterval: 15000,
@@ -76,6 +77,7 @@ export default function EventDetailPage() {
   const phase = PHASE_LABEL[event.phase]
   const untilQueue = new Date(event.checkin_until).getTime() - now
   const stats = state?.stats
+  const hasBranches = event.branches.length > 0
 
   return (
     <>
@@ -85,6 +87,12 @@ export default function EventDetailPage() {
           <div className="sub">
             Boshlanish: {formatDateTime(event.starts_at)} · Skanerlash tugashi:{' '}
             {formatDateTime(event.checkin_until)} · <span className={`badge ${phase.tone}`}>{phase.text}</span>
+            {hasBranches &&
+              event.branches.map((b) => (
+                <span key={b.id} className="badge blue" style={{ marginLeft: 6 }}>
+                  {b.name}
+                </span>
+              ))}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -94,9 +102,23 @@ export default function EventDetailPage() {
           <Link className="btn ghost sm" to="/manager">
             Menejer paneli
           </Link>
-          <a className="btn ghost sm" href={displayLink} target="_blank" rel="noreferrer">
-            Ofis ekrani ↗
-          </a>
+          {hasBranches ? (
+            event.branches.map((b) => (
+              <a
+                key={b.id}
+                className="btn ghost sm"
+                href={`${displayLink}?branch=${b.id}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Ekran: {b.name} ↗
+              </a>
+            ))
+          ) : (
+            <a className="btn ghost sm" href={displayLink} target="_blank" rel="noreferrer">
+              Ofis ekrani ↗
+            </a>
+          )}
           <CopyButton text={displayLink} label="Ekran havolasini nusxalash" />
         </div>
       </div>
@@ -139,6 +161,19 @@ export default function EventDetailPage() {
             <span>Kelmadi</span>
           </div>
         </div>
+        {hasBranches && !!state?.by_branch?.length && (
+          <div style={{ marginTop: 14 }}>
+            {state.by_branch.map((b) => (
+              <div className="list-row" key={b.id}>
+                <span style={{ fontWeight: 600 }}>{b.name}</span>
+                <span className="muted mono">
+                  {b.stats.registered} yozilgan · {b.stats.arrived} kelgan · {b.stats.waiting}{' '}
+                  kutmoqda · {b.stats.done} yakunlandi
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {!!state?.active?.length && (
           <div style={{ marginTop: 14 }}>
             {state.active.map((t) => (
@@ -147,6 +182,7 @@ export default function EventDetailPage() {
                   <b>{t.number}</b> {t.name}
                 </span>
                 <span className="muted">
+                  {t.branch_name ? `${t.branch_name} · ` : ''}
                   {t.desk_number}-stol · {t.status === 'serving' ? 'xizmatda' : 'chaqirildi'}
                 </span>
               </div>
@@ -185,6 +221,22 @@ export default function EventDetailPage() {
               </option>
             ))}
           </select>
+          {hasBranches && (
+            <select
+              className="input"
+              style={{ maxWidth: 200 }}
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              aria-label="Filial bo‘yicha filtrlash"
+            >
+              <option value="">Barcha filiallar</option>
+              {event.branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         {ticketsQuery.isLoading ? (
           <Spinner />
@@ -197,6 +249,7 @@ export default function EventDetailPage() {
                 <tr>
                   <th>№</th>
                   <th>Mijoz</th>
+                  {hasBranches && <th>Filial</th>}
                   <th>Telefon</th>
                   <th>Ro‘yxat vaqti</th>
                   <th>Holat</th>
@@ -213,6 +266,7 @@ export default function EventDetailPage() {
                         {ticket.first_name} {ticket.last_name}
                         {ticket.source === 'seed' && <span className="badge dim"> sinov</span>}
                       </td>
+                      {hasBranches && <td className="muted">{ticket.branch_name ?? '—'}</td>}
                       <td className="muted">{prettyPhone(ticket.phone)}</td>
                       <td className="muted">{formatDateTime(ticket.registered_at)}</td>
                       <td>

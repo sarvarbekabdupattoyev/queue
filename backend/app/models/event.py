@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, UTCDateTime, now_utc
+from app.models.branch import Branch, event_branches
 from app.models.enums import EventPhase
 
 
@@ -36,9 +37,18 @@ class SaleEvent(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now_utc)
 
     company: Mapped["Company"] = relationship(back_populates="events")  # noqa: F821
+    # branches the event runs in; empty = single-office event (no scoping).
+    # lazy="selectin" keeps the list available in async code paths without
+    # explicit eager-load options at every call site.
+    branches: Mapped[list[Branch]] = relationship(
+        secondary=event_branches, order_by=Branch.id, lazy="selectin"
+    )
     tickets: Mapped[list["Ticket"]] = relationship(  # noqa: F821
         back_populates="event", cascade="all, delete-orphan"
     )
+
+    def branch_ids(self) -> list[int]:
+        return [b.id for b in self.branches]
 
     def phase(self, at: datetime | None = None) -> EventPhase:
         at = at or now_utc()

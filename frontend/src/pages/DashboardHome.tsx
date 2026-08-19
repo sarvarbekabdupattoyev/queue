@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import type { Desk, SaleEvent, User } from '../api/types'
+import type { Branch, Desk, SaleEvent, User } from '../api/types'
 import { useCompany } from '../components/DashboardLayout'
 import { IconCheck } from '../components/icons'
 import { Spinner } from '../components/ui'
@@ -19,16 +19,50 @@ export default function DashboardHome() {
     queryFn: () => api<User[]>('/employees'),
   })
   const { data: desks } = useQuery({ queryKey: ['desks'], queryFn: () => api<Desk[]>('/desks') })
+  const { data: branches } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => api<Branch[]>('/branches'),
+  })
+  const hasBranches = (branches?.length ?? 0) > 0
 
   const activeEvents = events?.filter((e) => e.is_active && e.phase !== 'closed') ?? []
+  // the intended order: settings → branches (only if the company has several
+  // offices) → managers → desks → the first tadbir
   const setupSteps = [
-    { done: !!company, label: 'Kompaniya yaratildi', to: '/dashboard/settings' },
-    { done: !!company?.has_bot_token, label: 'Telegram bot ulandi', to: '/dashboard/settings' },
-    { done: (employees?.length ?? 0) > 0, label: 'Xodimlar qo‘shildi', to: '/dashboard/employees' },
-    { done: (desks?.length ?? 0) > 0, label: 'Stollar yaratildi', to: '/dashboard/desks' },
-    { done: (events?.length ?? 0) > 0, label: 'Sotuv tadbiri e’lon qilindi', to: '/dashboard/events' },
+    {
+      done: !!company?.has_bot_token,
+      label: 'Sozlamalar: kompaniya ma’lumotlari va Telegram bot',
+      to: '/dashboard/settings',
+      optional: false,
+    },
+    {
+      done: hasBranches,
+      label: 'Filiallar qo‘shildi (ixtiyoriy — bir nechta ofis bo‘lsa)',
+      to: '/dashboard/branches',
+      optional: true,
+    },
+    {
+      done: (employees ?? []).some((e) => e.role === 'manager'),
+      label: hasBranches ? 'Har bir filialga menejerlar qo‘shildi' : 'Menejerlar qo‘shildi',
+      to: '/dashboard/employees',
+      optional: false,
+    },
+    {
+      done: (desks?.length ?? 0) > 0,
+      label: hasBranches
+        ? 'Filiallarda stollar yaratildi va menejerlar biriktirildi'
+        : 'Stollar yaratildi va menejerlar biriktirildi',
+      to: '/dashboard/desks',
+      optional: false,
+    },
+    {
+      done: (events?.length ?? 0) > 0,
+      label: 'Sotuv tadbiri e’lon qilindi',
+      to: '/dashboard/events',
+      optional: false,
+    },
   ]
-  const pending = setupSteps.filter((s) => !s.done)
+  const pending = setupSteps.filter((s) => !s.done && !s.optional)
 
   return (
     <>
@@ -45,7 +79,8 @@ export default function DashboardHome() {
       {pending.length > 0 && (
         <div className="card">
           <div className="card-title">
-            Ishga tayyorlash ({setupSteps.length - pending.length}/{setupSteps.length})
+            Ishga tayyorlash — tartib bilan ({setupSteps.filter((s) => s.done && !s.optional).length}/
+            {setupSteps.filter((s) => !s.optional).length})
           </div>
           {setupSteps.map((step) => (
             <div className="check-row" key={step.label}>
@@ -57,7 +92,7 @@ export default function DashboardHome() {
               </span>
               {!step.done && (
                 <Link className="btn tonal sm" to={step.to}>
-                  Bajarish
+                  {step.optional ? 'Ochish' : 'Bajarish'}
                 </Link>
               )}
             </div>
@@ -95,6 +130,17 @@ export default function DashboardHome() {
       </div>
 
       <div className="grid-3">
+        {hasBranches && (
+          <div className="card">
+            <div className="card-title">Filiallar</div>
+            <div className="mono" style={{ fontSize: 30 }}>
+              {branches?.length ?? '—'}
+            </div>
+            <Link className="hint" to="/dashboard/branches">
+              Boshqarish →
+            </Link>
+          </div>
+        )}
         <div className="card">
           <div className="card-title">Xodimlar</div>
           <div className="mono" style={{ fontSize: 30 }}>
@@ -114,10 +160,16 @@ export default function DashboardHome() {
           </Link>
         </div>
         <div className="card">
-          <div className="card-title">Telegram bot</div>
+          <div className="card-title">Telegram botlar</div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>
-            {company?.telegram_bot_username ? `@${company.telegram_bot_username}` : 'Ulanmagan'}
+            {company && company.bots.length > 0
+              ? `${company.bots.length} ta ulangan${company.telegram_bot_username ? ` · @${company.telegram_bot_username}` : ''}`
+              : 'Ulanmagan'}
           </div>
+          <p className="hint" style={{ margin: '4px 0 0' }}>
+            Katta ro‘yxatdan o‘tish kunlari uchun {company?.max_bots ?? 3} tagacha parallel bot
+            ulash mumkin.
+          </p>
           <Link className="hint" to="/dashboard/settings">
             Sozlash →
           </Link>

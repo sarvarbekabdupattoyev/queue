@@ -57,6 +57,8 @@ async def create_ticket(
     last_name: str,
     phone: str,
     telegram_chat_id: int | None = None,
+    branch_id: int | None = None,
+    bot_id: int | None = None,
     source: TicketSource = TicketSource.BOT,
 ) -> Ticket:
     if not event.registration_open():
@@ -65,6 +67,13 @@ async def create_ticket(
     # afterwards would lazy-load synchronously and crash under asyncpg, so
     # capture it up front and never dereference the ORM object again.
     event_id = event.id
+    event_branch_ids = event.branch_ids()
+    if event_branch_ids:
+        # the client queues at ONE branch of a multi-branch event
+        if branch_id not in event_branch_ids:
+            raise DomainError("Filial tanlanmagan yoki bu tadbirga tegishli emas")
+    else:
+        branch_id = None
 
     existing = await get_ticket_by_phone(db, event_id, phone)
     if existing is not None:
@@ -76,6 +85,8 @@ async def create_ticket(
         number = await _pick_free_number(db, event_id)
         ticket = Ticket(
             event_id=event_id,
+            branch_id=branch_id,
+            bot_id=bot_id,
             number=number,
             code=make_code(number),
             first_name=first_name,

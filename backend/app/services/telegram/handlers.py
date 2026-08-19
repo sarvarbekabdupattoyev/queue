@@ -1,10 +1,12 @@
 """Telegram bot conversation, shared by every company bot.
 
-/start → (choose event if several are open) → first name → last name → phone
-(contact button or typed) → ticket with a random 4-digit number + QR photo.
+/start → (choose event if several are open) → (choose branch if the event
+runs in several) → first name → last name → phone (contact button or typed)
+→ ticket with a random 4-digit number + QR photo.
 
-Handlers are module-level functions; the owning company is injected by the
-dispatcher (``Dispatcher(company_id=...)`` workflow data), so N company bots
+Handlers are module-level functions; the owning company and the bot's DB row
+are injected by the dispatcher (``Dispatcher(company_id=..., bot_db_id=...)``
+workflow data), so N bots — including several parallel bots of ONE company —
 share one code path, one FSM storage (keys are bot-scoped) and no closures.
 """
 
@@ -31,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.phone import normalize_phone, pretty_phone
 from app.db.base import now_utc
 from app.db.session import SessionFactory
-from app.models import SaleEvent, Ticket, TicketStatus
+from app.models import Branch, SaleEvent, Ticket, TicketStatus
 from app.services import queue_service, ticket_service
 from app.services.errors import DomainError
 from app.services.qr_service import qr_png_bytes_async
@@ -62,6 +64,7 @@ STATUS_UZ = {
 
 class Registration(StatesGroup):
     choosing_event = State()
+    choosing_branch = State()
     first_name = State()
     last_name = State()
     phone = State()
@@ -103,9 +106,12 @@ async def _send_ticket(
     message: Message, session: AsyncSession, ticket: Ticket, intro: str = ""
 ) -> None:
     event = await session.get(SaleEvent, ticket.event_id)
+    branch = await session.get(Branch, ticket.branch_id) if ticket.branch_id else None
+    branch_line = f"📍 Filial: {branch.name}\n" if branch else ""
     caption = (
         f"{intro}🎫 Navbat raqamingiz: №{ticket.number}\n"
         f"🗓 {event.name} — {queue_service.fmt_local(event.starts_at)}\n"
+        f"{branch_line}"
         f"👤 {ticket.full_name}\n"
         f"📞 {pretty_phone(ticket.phone)}\n\n"
         f"Ofisga kelganda shu QR-kodni qabulxonada ko'rsating — kelganingiz qayd etiladi. "
@@ -122,8 +128,9 @@ async def _send_ticket(
 
 async def _status_text(session: AsyncSession, ticket: Ticket) -> str:
     event = await session.get(SaleEvent, ticket.event_id)
-    active = await queue_service.active_tickets(session, event.id)
-    waiting_total = await queue_service.waiting_count(session, event.id)
+    # branch tickets see only their own branch's queue
+    active = await queue_service.active_tickets(session, event.id, ticket.branch_id)
+    waiting_total = await queue_service.waiting_count(session, event.id, ticket.branch_id)
     desk_numbers = await queue_service.desk_numbers_for(session, active)
     if active:
         serving = ", ".join(
@@ -158,6 +165,38 @@ async def _status_text(session: AsyncSession, ticket: Ticket) -> str:
 
 # ----------------------------------------------------------------- handlers ---
 
+async def _ask_branch_or_name(message: Message, state: FSMContext, event: SaleEvent) -> None:
+    """After the event is chosen: pick a branch (when the event runs in
+    several), then move on to the name step. The queue is branch-scoped, so
+    the client queues at the branch they will actually visit."""
+    branches = list(event.branches)
+    if len(branches) > 1:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=(f"{b.name} — {b.address}" if b.address else b.name)[:60],
+                        callback_data=f"br:{b.id}",
+                    )
+                ]
+                for b in branches
+            ]
+        )
+        await state.set_state(Registration.choosing_branch)
+        await state.update_data(event_id=event.id)
+        await message.answer(
+            "Tadbir bir nechta filialda o'tkaziladi. Qaysi filialga borasiz? "
+            "Navbatingiz shu filialda amal qiladi.",
+            reply_markup=keyboard,
+        )
+        return
+    branch = branches[0] if branches else None
+    await state.set_state(Registration.first_name)
+    await state.update_data(event_id=event.id, branch_id=branch.id if branch else None)
+    prefix = f"📍 Filial: {branch.name}\n\n" if branch else ""
+    await message.answer(f"{prefix}1/3 — Ismingizni yozing:", reply_markup=ReplyKeyboardRemove())
+
+
 async def cmd_start(message: Message, state: FSMContext, company_id: int) -> None:
     await state.clear()
     async with SessionFactory() as session:
@@ -179,14 +218,13 @@ async def cmd_start(message: Message, state: FSMContext, company_id: int) -> Non
             return
         if len(open_without_ticket) == 1:
             event = open_without_ticket[0]
-            await state.set_state(Registration.first_name)
-            await state.update_data(event_id=event.id)
             await message.answer(
                 f"Assalomu alaykum! «{event.name}» uchun onlayn navbat botiga xush kelibsiz.\n\n"
                 "Ro'yxatdan o'tish uchun 3 ta ma'lumot kerak: ism, familiya va telefon raqam. "
-                "Bitta telefonga bitta navbat beriladi.\n\n1/3 — Ismingizni yozing:",
+                "Bitta telefonga bitta navbat beriladi.",
                 reply_markup=ReplyKeyboardRemove(),
             )
+            await _ask_branch_or_name(message, state, event)
             return
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -212,10 +250,31 @@ async def choose_event(callback: CallbackQuery, state: FSMContext, company_id: i
         if event is None or event.company_id != company_id or not event.registration_open():
             await callback.answer("Bu tadbir uchun ro'yxat yopilgan", show_alert=True)
             return
+        await callback.answer()
+        await _ask_branch_or_name(callback.message, state, event)
+
+
+async def choose_branch(callback: CallbackQuery, state: FSMContext, company_id: int) -> None:
+    branch_id = int(callback.data.split(":", 1)[1])
+    data = await state.get_data()
+    async with SessionFactory() as session:
+        event = await session.get(SaleEvent, data.get("event_id", 0))
+        if (
+            event is None
+            or event.company_id != company_id
+            or not event.registration_open()
+            or branch_id not in event.branch_ids()
+        ):
+            await callback.answer("Bu filial uchun ro'yxatdan o'tib bo'lmaydi", show_alert=True)
+            return
+        branch_name = next(b.name for b in event.branches if b.id == branch_id)
     await callback.answer()
     await state.set_state(Registration.first_name)
-    await state.update_data(event_id=event_id)
-    await callback.message.answer("1/3 — Ismingizni yozing:", reply_markup=ReplyKeyboardRemove())
+    await state.update_data(branch_id=branch_id)
+    await callback.message.answer(
+        f"📍 Filial: {branch_name}\n\n1/3 — Ismingizni yozing:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 async def cmd_ticket(message: Message, company_id: int) -> None:
@@ -272,12 +331,12 @@ async def reg_last_name(message: Message, state: FSMContext) -> None:
     )
 
 
-async def reg_phone_contact(message: Message, state: FSMContext) -> None:
-    await _finish_registration(message, state, message.contact.phone_number)
+async def reg_phone_contact(message: Message, state: FSMContext, bot_db_id: int) -> None:
+    await _finish_registration(message, state, message.contact.phone_number, bot_db_id)
 
 
-async def reg_phone_text(message: Message, state: FSMContext) -> None:
-    await _finish_registration(message, state, message.text)
+async def reg_phone_text(message: Message, state: FSMContext, bot_db_id: int) -> None:
+    await _finish_registration(message, state, message.text, bot_db_id)
 
 
 async def menu_ticket(message: Message, company_id: int) -> None:
@@ -293,7 +352,9 @@ async def fallback(message: Message, state: FSMContext) -> None:
         await message.answer("Ro'yxatdan o'tish uchun /start ni bosing.", reply_markup=MAIN_MENU)
 
 
-async def _finish_registration(message: Message, state: FSMContext, raw_phone: str) -> None:
+async def _finish_registration(
+    message: Message, state: FSMContext, raw_phone: str, bot_db_id: int
+) -> None:
     phone = normalize_phone(raw_phone)
     if phone is None:
         await message.answer("Raqam noto'g'ri. O'zbekiston raqamini kiriting: +998 XX XXX XX XX")
@@ -310,8 +371,11 @@ async def _finish_registration(message: Message, state: FSMContext, raw_phone: s
         existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
         if existing is not None:
             await state.clear()
-            if existing.telegram_chat_id is None:
-                existing.telegram_chat_id = message.chat.id
+            if existing.telegram_chat_id is None or existing.bot_id is None:
+                if existing.telegram_chat_id is None:
+                    existing.telegram_chat_id = message.chat.id
+                if existing.bot_id is None:
+                    existing.bot_id = bot_db_id
                 await session.commit()
             await message.answer(
                 "Bu telefon raqamiga navbat allaqachon berilgan. Mana u:",
@@ -327,6 +391,8 @@ async def _finish_registration(message: Message, state: FSMContext, raw_phone: s
                 last_name=data["last_name"],
                 phone=phone,
                 telegram_chat_id=message.chat.id,
+                branch_id=data.get("branch_id"),
+                bot_id=bot_db_id,
             )
         except DomainError as exc:
             await state.clear()
@@ -349,6 +415,9 @@ def build_router() -> Router:
     router.message.register(cmd_help, Command("help"))
     router.callback_query.register(
         choose_event, Registration.choosing_event, F.data.startswith("ev:")
+    )
+    router.callback_query.register(
+        choose_branch, Registration.choosing_branch, F.data.startswith("br:")
     )
     router.message.register(reg_first_name, Registration.first_name, F.text)
     router.message.register(reg_last_name, Registration.last_name, F.text)

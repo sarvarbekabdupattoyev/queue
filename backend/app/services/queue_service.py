@@ -46,29 +46,37 @@ def _epoch_us(dt: datetime) -> int:
 
 # ---------------------------------------------------------------- queries ---
 
-def _waiting_stmt(event_id: int):
-    return (
-        select(Ticket)
-        .where(Ticket.event_id == event_id, Ticket.status == TicketStatus.CHECKED_IN)
-        .order_by(Ticket.queue_order, Ticket.id)
+def _waiting_stmt(event_id: int, branch_id: int | None = None):
+    stmt = select(Ticket).where(
+        Ticket.event_id == event_id, Ticket.status == TicketStatus.CHECKED_IN
     )
+    if branch_id is not None:
+        stmt = stmt.where(Ticket.branch_id == branch_id)
+    return stmt.order_by(Ticket.queue_order, Ticket.id)
 
 
-async def waiting_tickets(db: AsyncSession, event_id: int) -> list[Ticket]:
-    return list((await db.scalars(_waiting_stmt(event_id))).all())
+async def waiting_tickets(
+    db: AsyncSession, event_id: int, branch_id: int | None = None
+) -> list[Ticket]:
+    return list((await db.scalars(_waiting_stmt(event_id, branch_id))).all())
 
 
-async def waiting_count(db: AsyncSession, event_id: int) -> int:
-    return (
-        await db.scalar(
-            select(func.count())
-            .select_from(Ticket)
-            .where(Ticket.event_id == event_id, Ticket.status == TicketStatus.CHECKED_IN)
-        )
-    ) or 0
+async def waiting_count(
+    db: AsyncSession, event_id: int, branch_id: int | None = None
+) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(Ticket)
+        .where(Ticket.event_id == event_id, Ticket.status == TicketStatus.CHECKED_IN)
+    )
+    if branch_id is not None:
+        stmt = stmt.where(Ticket.branch_id == branch_id)
+    return (await db.scalar(stmt)) or 0
 
 
-async def active_tickets(db: AsyncSession, event_id: int) -> list[Ticket]:
+async def active_tickets(
+    db: AsyncSession, event_id: int, branch_id: int | None = None
+) -> list[Ticket]:
     stmt = (
         select(Ticket)
         .where(
@@ -77,10 +85,14 @@ async def active_tickets(db: AsyncSession, event_id: int) -> list[Ticket]:
         )
         .order_by(Ticket.called_at.desc())
     )
+    if branch_id is not None:
+        stmt = stmt.where(Ticket.branch_id == branch_id)
     return list((await db.scalars(stmt)).all())
 
 
 async def position_of(db: AsyncSession, ticket: Ticket) -> int | None:
+    """1-based position among the checked-in tickets of the SAME branch
+    (branch NULL compares as IS NULL, i.e. the single-office queue)."""
     if ticket.status != TicketStatus.CHECKED_IN:
         return None
     ahead = await db.scalar(
@@ -88,6 +100,7 @@ async def position_of(db: AsyncSession, ticket: Ticket) -> int | None:
         .select_from(Ticket)
         .where(
             Ticket.event_id == ticket.event_id,
+            Ticket.branch_id == ticket.branch_id,
             Ticket.status == TicketStatus.CHECKED_IN,
             (Ticket.queue_order < ticket.queue_order)
             | ((Ticket.queue_order == ticket.queue_order) & (Ticket.id < ticket.id)),
@@ -115,15 +128,7 @@ async def desk_numbers_for(db: AsyncSession, tickets: list[Ticket]) -> dict[int,
 
 # ----------------------------------------------------------- state payloads ---
 
-async def _stats(db: AsyncSession, event_id: int) -> dict[str, int]:
-    rows = (
-        await db.execute(
-            select(Ticket.status, func.count())
-            .where(Ticket.event_id == event_id)
-            .group_by(Ticket.status)
-        )
-    ).all()
-    by_status = {status: count for status, count in rows}
+def _stats_from(by_status: dict[TicketStatus, int]) -> dict[str, int]:
     total = sum(c for s, c in by_status.items() if s != TicketStatus.CANCELLED)
     arrived = sum(
         c
@@ -139,6 +144,26 @@ async def _stats(db: AsyncSession, event_id: int) -> dict[str, int]:
     }
 
 
+async def _stats_by_branch(
+    db: AsyncSession, event_id: int
+) -> tuple[dict[str, int], dict[int, dict[str, int]]]:
+    """Overall stats plus a per-branch breakdown in a single grouped query."""
+    rows = (
+        await db.execute(
+            select(Ticket.branch_id, Ticket.status, func.count())
+            .where(Ticket.event_id == event_id)
+            .group_by(Ticket.branch_id, Ticket.status)
+        )
+    ).all()
+    overall: dict[TicketStatus, int] = {}
+    per_branch: dict[int, dict[TicketStatus, int]] = {}
+    for branch_id, status, count in rows:
+        overall[status] = overall.get(status, 0) + count
+        if branch_id is not None:
+            per_branch.setdefault(branch_id, {})[status] = count
+    return _stats_from(overall), {b: _stats_from(s) for b, s in per_branch.items()}
+
+
 def _event_info(event: SaleEvent, company: Company | None) -> dict[str, Any]:
     return {
         "id": event.id,
@@ -148,19 +173,37 @@ def _event_info(event: SaleEvent, company: Company | None) -> dict[str, Any]:
         "checkin_until": event.checkin_until.isoformat(),
         "company_name": company.name if company else "",
         "logo_url": f"/media/{company.logo_path}" if company and company.logo_path else None,
+        "branches": [{"id": b.id, "name": b.name} for b in event.branches],
     }
 
 
 async def build_states(
     db: AsyncSession, event: SaleEvent
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build the public (display) and staff payloads in one query pass."""
+    """Build the public (display) and staff payloads in one query pass.
+
+    Branch events keep ONE payload per event (one broadcast room): every
+    ticket entry carries its branch_id and ``by_branch`` holds the per-branch
+    queues, so each screen filters down to its own branch client-side.
+    """
     company = await db.get(Company, event.company_id)
+    branches = list(event.branches)
+    branch_names = {b.id: b.name for b in branches}
     waiting = await waiting_tickets(db, event.id)
     active = await active_tickets(db, event.id)
     desk_numbers = await desk_numbers_for(db, active)
-    stats = await _stats(db, event.id)
+    stats, branch_stats = await _stats_by_branch(db, event.id)
     settings = get_settings()
+
+    def branch_section(branch_id: int) -> dict[str, Any]:
+        mine = [t for t in waiting if t.branch_id == branch_id]
+        return {
+            "id": branch_id,
+            "name": branch_names.get(branch_id, ""),
+            "next": [t.number for t in mine[:12]],
+            "late_numbers": [t.number for t in mine[:12] if t.late],
+            "stats": branch_stats.get(branch_id, _stats_from({})),
+        }
 
     public_state: dict[str, Any] = {
         "type": "state",
@@ -171,6 +214,7 @@ async def build_states(
             {
                 "number": t.number,
                 "desk_number": desk_numbers.get(t.desk_id),
+                "branch_id": t.branch_id,
                 "status": t.status.value,
                 "called_at": t.called_at.isoformat() if t.called_at else None,
             }
@@ -178,10 +222,17 @@ async def build_states(
         ],
         "next": [t.number for t in waiting[:12]],
         "late_numbers": [t.number for t in waiting[:12] if t.late],
+        "by_branch": [branch_section(b.id) for b in branches],
         "stats": stats,
     }
 
-    def staff_view(t: Ticket, position: int | None = None) -> dict[str, Any]:
+    branch_positions: dict[int | None, int] = {}
+
+    def staff_view(t: Ticket, waiting_entry: bool = False) -> dict[str, Any]:
+        position = None
+        if waiting_entry:
+            position = branch_positions.get(t.branch_id, 0) + 1
+            branch_positions[t.branch_id] = position
         return {
             "id": t.id,
             "number": t.number,
@@ -189,6 +240,8 @@ async def build_states(
             "phone": t.phone,
             "status": t.status.value,
             "late": t.late,
+            "branch_id": t.branch_id,
+            "branch_name": branch_names.get(t.branch_id),
             "desk_id": t.desk_id,
             "desk_number": desk_numbers.get(t.desk_id),
             "called_at": t.called_at.isoformat() if t.called_at else None,
@@ -199,7 +252,7 @@ async def build_states(
 
     staff_state: dict[str, Any] = {
         **public_state,
-        "waiting_list": [staff_view(t, i + 1) for i, t in enumerate(waiting)],
+        "waiting_list": [staff_view(t, waiting_entry=True) for t in waiting],
         "active": [staff_view(t) for t in active],
     }
     return public_state, staff_state
@@ -220,7 +273,11 @@ async def build_staff_state(db: AsyncSession, event: SaleEvent) -> dict[str, Any
 async def _notify(event: SaleEvent, ticket: Ticket, text: str) -> None:
     if ticket.telegram_chat_id is None:
         return
-    await notify.send_telegram_text(event.company_id, ticket.telegram_chat_id, text)
+    # prefer the bot the client registered through (only that bot is
+    # guaranteed to be allowed to message them)
+    await notify.send_telegram_text(
+        event.company_id, ticket.telegram_chat_id, text, bot_id=ticket.bot_id
+    )
 
 
 # ----------------------------------------------------------------- actions ---
@@ -328,6 +385,15 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
         raise DomainError(
             f"Navbat hali boshlanmagan — skanerlash {fmt_local(event.checkin_until)} gacha davom etadi"
         )
+    # branch events: a desk serves only its own branch's slice of the queue
+    branch_ids = event.branch_ids()
+    branch_scope: int | None = None
+    if branch_ids:
+        if desk.branch_id is None:
+            raise DomainError("Bu tadbir filiallarda o'tkaziladi — stolni filialga biriktiring")
+        if desk.branch_id not in branch_ids:
+            raise DomainError("Bu stol filiali tadbirga qo'shilmagan")
+        branch_scope = desk.branch_id
     busy = await db.scalar(
         select(Ticket.id).where(
             Ticket.event_id == event.id,
@@ -338,7 +404,7 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
     if busy is not None:
         raise ConflictError("Bu stolda hali mijoz bor — avval yakunlang yoki o'tkazib yuboring")
 
-    ticket = await db.scalar(_waiting_stmt(event.id).limit(1))
+    ticket = await db.scalar(_waiting_stmt(event.id, branch_scope).limit(1))
     if ticket is None:
         return None
     settings = get_settings()

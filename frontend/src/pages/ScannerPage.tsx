@@ -2,8 +2,9 @@ import jsQR from 'jsqr'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, getToken, wsUrl } from '../api/client'
 import type { CheckinResponse, StaffState } from '../api/types'
+import { useAuth } from '../auth/AuthContext'
 import { StaffShell } from '../components/StaffShell'
-import { IconCamera } from '../components/icons'
+import { IconCamera, IconMapPin } from '../components/icons'
 import { formatLongCountdown, formatTime } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
@@ -13,6 +14,7 @@ interface ScanRecord {
   message: string
   number?: number
   name?: string
+  branchId?: number | null
 }
 
 function resultTone(kind: ScanRecord['kind']): string {
@@ -22,6 +24,7 @@ function resultTone(kind: ScanRecord['kind']): string {
 }
 
 export default function ScannerPage() {
+  const { user } = useAuth()
   const now = useTick()
   const [eventId, setEventId] = useState<number | null>(() => {
     const saved = localStorage.getItem('navbat_event')
@@ -62,6 +65,7 @@ export default function ScannerPage() {
           message: result.message,
           number: result.ticket.number,
           name: `${result.ticket.first_name} ${result.ticket.last_name}`,
+          branchId: result.ticket.branch_id,
         }
         setLast(record)
         setHistory((h) => [record, ...h].slice(0, 12))
@@ -144,6 +148,13 @@ export default function ScannerPage() {
 
   const checkinOpen = state ? state.event.phase !== 'closed' : true
   const untilDeadline = state ? new Date(state.event.checkin_until).getTime() - now : 0
+  const branchName = (id: number | null | undefined) =>
+    id == null ? null : (state?.event.branches.find((b) => b.id === id)?.name ?? null)
+  // branch scanners watch their own branch's numbers
+  const stats =
+    user?.branch_id != null
+      ? (state?.by_branch.find((b) => b.id === user.branch_id)?.stats ?? state?.stats)
+      : state?.stats
 
   return (
     <StaffShell
@@ -223,6 +234,14 @@ export default function ScannerPage() {
                 <>
                   <div className="big">{last.number ? `№${last.number}` : '—'}</div>
                   {last.name && <div style={{ fontSize: 17, fontWeight: 600 }}>{last.name}</div>}
+                  {branchName(last.branchId) && (
+                    <div
+                      className="muted"
+                      style={{ marginTop: 2, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <IconMapPin size={14} /> {branchName(last.branchId)}
+                    </div>
+                  )}
                   <div style={{ marginTop: 6 }}>{last.message}</div>
                 </>
               ) : (
@@ -248,19 +267,22 @@ export default function ScannerPage() {
               )}
             </div>
 
-            {state && (
+            {stats && (
               <div className="card">
+                {user?.branch_id != null && branchName(user.branch_id) && (
+                  <div className="card-title">{branchName(user.branch_id)} filiali</div>
+                )}
                 <div className="stat-row">
                   <div className="stat">
-                    <b>{state.stats.registered}</b>
+                    <b>{stats.registered}</b>
                     <span>Yozilgan</span>
                   </div>
                   <div className="stat">
-                    <b>{state.stats.arrived}</b>
+                    <b>{stats.arrived}</b>
                     <span>Kelgan</span>
                   </div>
                   <div className="stat">
-                    <b>{state.stats.waiting}</b>
+                    <b>{stats.waiting}</b>
                     <span>Kutmoqda</span>
                   </div>
                 </div>

@@ -7,7 +7,7 @@ Redis and this service consumes them; running it without Redis alongside an
 embedded-mode API would double-poll every bot (Telegram 409s).
 
 In webhook mode (BOT_WEBHOOK_BASE set) Telegram POSTs updates to
-``/tgwh/{company_id}``; the route ACKs immediately and processing happens in
+``/tgwh/{bot_id}``; the route ACKs immediately and processing happens in
 semaphore-bounded tasks, which is what absorbs 1000–2000 registrations in a
 few seconds. Without a public URL it falls back to long polling.
 """
@@ -71,18 +71,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="SmartNavbat Bot Service", lifespan=lifespan, docs_url=None, openapi_url=None)
 
 
-@app.post("/tgwh/{company_id}")
+@app.post("/tgwh/{bot_id}")
 async def telegram_webhook(
-    company_id: int,
+    bot_id: int,
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(default=""),
 ) -> dict:
     payload = await request.json()
     accepted = await bot_manager.feed_webhook(
-        company_id, x_telegram_bot_api_secret_token, payload
+        bot_id, x_telegram_bot_api_secret_token, payload
     )
     if not accepted:
-        # unknown company or wrong secret — don't leak which
+        # unknown bot or wrong secret — don't leak which
         raise HTTPException(status_code=403, detail="forbidden")
     return {"ok": True}
 

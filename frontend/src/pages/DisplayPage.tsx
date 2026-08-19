@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { wsUrl } from '../api/client'
 import { IconExpand, IconSound } from '../components/icons'
 import type { PublicState } from '../api/types'
@@ -39,6 +39,9 @@ function CountdownRing({ calledAt, timeoutMs, now }: { calledAt: string; timeout
 
 export default function DisplayPage() {
   const { displayCode } = useParams()
+  const [searchParams] = useSearchParams()
+  // ?branch=<id> pins a TV to one branch of a multi-branch event
+  const branchParam = Number(searchParams.get('branch')) || null
   const now = useTick()
   const { state, connected } = useLiveState<PublicState>(
     displayCode ? wsUrl(`/ws/display/${displayCode}`) : null,
@@ -120,8 +123,16 @@ export default function DisplayPage() {
   const timeoutMs = state.call_timeout_minutes * 60000
   const untilQueue = new Date(state.event.checkin_until).getTime() - now
   const queueRunning = state.event.phase === 'queue' || state.event.phase === 'closed'
-  const called = state.called.slice(0, 6)
-  const lateSet = new Set(state.late_numbers)
+  // a branch TV shows only its branch's calls, queue and stats
+  const branchSection =
+    branchParam !== null ? (state.by_branch.find((b) => b.id === branchParam) ?? null) : null
+  const branchNames = new Map(state.event.branches.map((b) => [b.id, b.name]))
+  const called = state.called
+    .filter((c) => branchSection === null || c.branch_id === branchSection.id)
+    .slice(0, 6)
+  const next = branchSection ? branchSection.next : state.next
+  const stats = branchSection ? branchSection.stats : state.stats
+  const lateSet = new Set(branchSection ? branchSection.late_numbers : state.late_numbers)
 
   return (
     <div className="display-shell">
@@ -131,7 +142,10 @@ export default function DisplayPage() {
           {state.event.logo_url && <img src={state.event.logo_url} alt="" />}
           <div>
             <h1>{state.event.company_name || state.event.name}</h1>
-            <small>{state.event.name} · Onlayn navbat</small>
+            <small>
+              {state.event.name}
+              {branchSection ? ` · ${branchSection.name}` : ''} · Onlayn navbat
+            </small>
           </div>
         </div>
         <div className="display-clock">
@@ -180,6 +194,9 @@ export default function DisplayPage() {
                     <div className="n">{call.number}</div>
                     <div className="desk">
                       <b>{call.desk_number}-stol</b>
+                      {branchSection === null && call.branch_id !== null && (
+                        <span>{branchNames.get(call.branch_id)}</span>
+                      )}
                       <span>{call.status === 'serving' ? 'xizmatda' : 'chaqirildi'}</span>
                       {call.status === 'called' && call.called_at && (
                         <CountdownRing calledAt={call.called_at} timeoutMs={timeoutMs} now={now} />
@@ -195,10 +212,10 @@ export default function DisplayPage() {
         <div className="display-right">
           <section className="display-panel">
             <div className="display-eyebrow">
-              <span>Keyingi navbat</span>
-              <span className="cnt">{state.stats.waiting ? `${state.stats.waiting} kishi` : ''}</span>
+              <span>Keyingi navbat{branchSection ? ` · ${branchSection.name}` : ''}</span>
+              <span className="cnt">{stats.waiting ? `${stats.waiting} kishi` : ''}</span>
             </div>
-            {state.next.length === 0 ? (
+            {next.length === 0 ? (
               <div className="display-empty">
                 Navbatda hech kim yo‘q.
                 <br />
@@ -206,7 +223,7 @@ export default function DisplayPage() {
               </div>
             ) : (
               <div className="next-list">
-                {state.next.slice(0, 10).map((n) => (
+                {next.slice(0, 10).map((n) => (
                   <div key={n} className={`q${lateSet.has(n) ? ' late' : ''}`}>
                     {n}
                   </div>
@@ -217,19 +234,19 @@ export default function DisplayPage() {
           <section className="display-panel" style={{ padding: '1.6vh 1.6vw' }}>
             <div className="display-stats">
               <div className="stat">
-                <b>{state.stats.registered}</b>
+                <b>{stats.registered}</b>
                 <span>Yozilgan</span>
               </div>
               <div className="stat">
-                <b>{state.stats.arrived}</b>
+                <b>{stats.arrived}</b>
                 <span>Kelgan</span>
               </div>
               <div className="stat">
-                <b>{state.stats.waiting}</b>
+                <b>{stats.waiting}</b>
                 <span>Kutmoqda</span>
               </div>
               <div className="stat">
-                <b>{state.stats.done}</b>
+                <b>{stats.done}</b>
                 <span>Yakunlandi</span>
               </div>
             </div>

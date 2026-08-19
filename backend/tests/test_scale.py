@@ -71,12 +71,12 @@ async def test_broadcast_for_missing_event_is_silent(monkeypatch):
 async def test_notify_embedded_mode_hands_to_bot_manager(monkeypatch):
     sent = []
 
-    async def fake_send(company_id, chat_id, text):
-        sent.append((company_id, chat_id, text))
+    async def fake_send(company_id, chat_id, text, bot_db_id=None):
+        sent.append((company_id, chat_id, text, bot_db_id))
 
     monkeypatch.setattr(bot_manager, "send_text", fake_send)
-    await notify.send_telegram_text(7, 1234, "salom")
-    await _wait_for(lambda: sent == [(7, 1234, "salom")])
+    await notify.send_telegram_text(7, 1234, "salom", bot_id=3)
+    await _wait_for(lambda: sent == [(7, 1234, "salom", 3)])
 
 
 # ------------------------------------------------------------ webhook auth ---
@@ -167,15 +167,15 @@ async def test_notify_roundtrip_via_redis(redis_client, monkeypatch):
     monkeypatch.setattr(redis_core, "_client", redis_client)
     sent = []
 
-    async def fake_send(company_id, chat_id, text):
-        sent.append((company_id, chat_id, text))
+    async def fake_send(company_id, chat_id, text, bot_db_id=None):
+        sent.append((company_id, chat_id, text, bot_db_id))
 
     monkeypatch.setattr(bot_manager, "send_text", fake_send)
     subscriber = asyncio.create_task(bot_manager.run_notify_subscriber())
     try:
         await asyncio.sleep(0.2)
-        await notify.send_telegram_text(9, 555, "Navbatingiz keldi")
-        await _wait_for(lambda: sent == [(9, 555, "Navbatingiz keldi")])
+        await notify.send_telegram_text(9, 555, "Navbatingiz keldi", bot_id=12)
+        await _wait_for(lambda: sent == [(9, 555, "Navbatingiz keldi", 12)])
     finally:
         subscriber.cancel()
         with pytest.raises(asyncio.CancelledError):

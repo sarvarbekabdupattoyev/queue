@@ -26,14 +26,25 @@ class Ticket(Base):
     __table_args__ = (
         UniqueConstraint("event_id", "number", name="uq_ticket_event_number"),
         UniqueConstraint("event_id", "phone", name="uq_ticket_event_phone"),
-        # hot paths: waiting-list ordering and per-chat lookups
+        # hot paths: waiting-list ordering (also per branch) and per-chat lookups
         Index("ix_ticket_event_status", "event_id", "status"),
+        Index("ix_ticket_event_branch_status", "event_id", "branch_id", "status"),
         Index("ix_ticket_event_chat", "event_id", "telegram_chat_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     event_id: Mapped[int] = mapped_column(
         ForeignKey("sale_events.id", ondelete="CASCADE"), index=True
+    )
+    # branch the client registered for (required when the event has branches);
+    # queue order, calling and positions are scoped inside one branch
+    branch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("branches.id", ondelete="SET NULL"), nullable=True
+    )
+    # bot the client registered through — notifications go out via this bot
+    # (a Telegram bot can only message users who started it)
+    bot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company_bots.id", ondelete="SET NULL"), nullable=True
     )
     # random (non-sequential) 4-digit queue number, unique within the event
     number: Mapped[int] = mapped_column(Integer)

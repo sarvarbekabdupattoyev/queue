@@ -18,7 +18,21 @@ export interface User {
   last_name: string
   role: Role
   company_id: number | null
+  branch_id: number | null
   is_active: boolean
+}
+
+export interface Branch {
+  id: number
+  name: string
+  address: string
+  desk_count: number
+  employee_count: number
+}
+
+export interface CompanyBot {
+  id: number
+  username: string | null
 }
 
 export interface TokenResponse {
@@ -43,6 +57,8 @@ export interface Company {
   id: number
   name: string
   logo_url: string | null
+  bots: CompanyBot[]
+  max_bots: number
   telegram_bot_username: string | null
   has_bot_token: boolean
   phones: CompanyPhone[]
@@ -60,6 +76,13 @@ export interface Desk {
   name: string
   manager_id: number | null
   manager_name: string | null
+  branch_id: number | null
+  branch_name: string | null
+}
+
+export interface EventBranch {
+  id: number
+  name: string
 }
 
 export interface SaleEvent {
@@ -70,6 +93,7 @@ export interface SaleEvent {
   is_active: boolean
   display_code: string
   phase: EventPhase
+  branches: EventBranch[]
   ticket_count: number
   checked_in_count: number
 }
@@ -84,6 +108,8 @@ export interface Ticket {
   status: TicketStatus
   late: boolean
   source: 'bot' | 'seed'
+  branch_id: number | null
+  branch_name: string | null
   registered_at: string
   checked_in_at: string | null
   called_at: string | null
@@ -100,6 +126,8 @@ export interface StaffTicketView {
   phone: string
   status: TicketStatus
   late: boolean
+  branch_id: number | null
+  branch_name: string | null
   desk_id: number | null
   desk_number: number | null
   called_at: string | null
@@ -116,6 +144,14 @@ export interface QueueStats {
   skipped: number
 }
 
+export interface BranchQueueState {
+  id: number
+  name: string
+  next: number[]
+  late_numbers: number[]
+  stats: QueueStats
+}
+
 export interface PublicState {
   type: 'state'
   event: {
@@ -126,17 +162,20 @@ export interface PublicState {
     checkin_until: string
     company_name: string
     logo_url: string | null
+    branches: EventBranch[]
   }
   now: string
   call_timeout_minutes: number
   called: {
     number: number
     desk_number: number | null
+    branch_id: number | null
     status: TicketStatus
     called_at: string | null
   }[]
   next: number[]
   late_numbers: number[]
+  by_branch: BranchQueueState[]
   stats: QueueStats
 }
 
@@ -166,6 +205,7 @@ export interface PublicTicket {
   position: number | null
   waiting_count: number
   desk_number: number | null
+  branch_name: string | null
   qr: string
   event: {
     name: string

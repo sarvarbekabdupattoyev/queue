@@ -1,5 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.company import MAX_BOTS_PER_COMPANY
 from app.schemas.auth import PhoneMixin
 
 
@@ -9,8 +10,17 @@ class CompanyCreate(BaseModel):
 
 class CompanyUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
-    # empty string clears the token (stops the bot)
-    telegram_bot_token: str | None = None
+
+
+class CompanyBotCreate(BaseModel):
+    token: str = Field(min_length=10, max_length=64)
+
+
+class CompanyBotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str | None
 
 
 class CompanyPhoneCreate(PhoneMixin):
@@ -46,7 +56,10 @@ class CompanyOut(BaseModel):
     id: int
     name: str
     logo_url: str | None = None
-    telegram_bot_username: str | None = None
+    # up to MAX_BOTS_PER_COMPANY parallel bots (tokens never leave the server)
+    bots: list[CompanyBotOut] = []
+    max_bots: int = MAX_BOTS_PER_COMPANY
     has_bot_token: bool = False
+    telegram_bot_username: str | None = None
     phones: list[CompanyPhoneOut] = []
     locations: list[CompanyLocationOut] = []

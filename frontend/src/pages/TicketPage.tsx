@@ -42,7 +42,10 @@ export default function TicketPage() {
   return (
     <div className="ticket-shell">
       <div className="ticket-card">
-        <div className="brand-sub">{data.event.name}</div>
+        <div className="brand-sub">
+          {data.event.name}
+          {data.branch_name ? ` · ${data.branch_name}` : ''}
+        </div>
         <div className="number">№{data.number}</div>
         <div className="muted">{data.first_name}, sizning navbat raqamingiz</div>
         <img className="qr" src={data.qr} alt={`№${data.number} QR kodi`} />

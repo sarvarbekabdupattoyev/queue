@@ -6,6 +6,7 @@ import type { Company } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { ThemeToggle } from './ThemeToggle'
 import {
+  IconBuilding,
   IconCalendar,
   IconDashboard,
   IconDesk,
@@ -16,12 +17,14 @@ import {
   type IconProps,
 } from './icons'
 
+// order mirrors the setup flow: settings → branches → staff → desks → events
 const NAV: { to: string; label: string; Icon: (p: IconProps) => JSX.Element; end?: boolean }[] = [
   { to: '/dashboard', label: 'Boshqaruv', Icon: IconDashboard, end: true },
-  { to: '/dashboard/events', label: 'Tadbirlar', Icon: IconCalendar },
+  { to: '/dashboard/settings', label: 'Sozlamalar', Icon: IconSettings },
+  { to: '/dashboard/branches', label: 'Filiallar', Icon: IconBuilding },
   { to: '/dashboard/employees', label: 'Xodimlar', Icon: IconUsers },
   { to: '/dashboard/desks', label: 'Stollar', Icon: IconDesk },
-  { to: '/dashboard/settings', label: 'Sozlamalar', Icon: IconSettings },
+  { to: '/dashboard/events', label: 'Tadbirlar', Icon: IconCalendar },
 ]
 
 export function useCompany() {

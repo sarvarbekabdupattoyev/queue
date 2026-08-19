@@ -30,15 +30,23 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 ## Features
 
 - **Owner accounts** — phone + password sign-up, one company per owner.
-- **Company profile** — name, logo, contact phone numbers, office locations, Telegram bot token.
+- **Company profile** — name, logo, contact phone numbers, office locations, Telegram bots.
+- **Branches ("filiallar")** — optional; one sale event can run in several branches at once,
+  each branch with its own managers, desks and an independent, branch-scoped queue
+  (clients pick their branch in the bot).
 - **Employees** — created by the owner with a **server-generated password** (shown once),
-  roles: `manager` (desk panel) and `scanner` (reception check-in).
-- **Desks ("tables")** — numbered desks, optionally pinned to a manager.
-- **Sale events** — many per company, each with its own dates, live phase
-  (`registration → checkin → queue`) and an unguessable public display link.
-- **Per-company Telegram bots** (aiogram): registration conversation (name → surname → phone via
-  contact button), QR photo delivery, `/navbat` and `/holat` commands, push notifications on
-  check-in / call / skip / finish.
+  roles: `manager` (desk panel) and `scanner` (reception check-in), optionally pinned to a branch.
+- **Desks ("tables")** — numbered desks, optionally pinned to a manager and a branch
+  (numbers are unique per branch).
+- **Sale events** — many per company, each with its own dates (entered as Tashkent local time,
+  24-hour), live phase (`registration → checkin → queue`), a branch multiselect and an
+  unguessable public display link (`?branch=` pins a TV to one branch).
+- **Up to 3 parallel Telegram bots per company** (aiogram): registration conversation
+  (event → branch → name → surname → phone via contact button), QR photo delivery, `/navbat`
+  and `/holat` commands, push notifications on check-in / call / skip / finish. Telegram caps
+  one bot at ~30 messages/s, so companies expecting a rush (up to ~10 000 sign-ups a minute)
+  spread the load across several bots — each client is notified via the bot they registered
+  through.
 - **Live everywhere** — WebSocket state for the TV display, manager panel, scanner and event
   dashboard, with automatic reconnect + HTTP polling fallback.
 - **TV display** — called numbers with desk and countdown ring, next-up list, stats, a
@@ -92,10 +100,10 @@ Key decisions:
 ```
 backend/            FastAPI app
   app/core/         settings, JWT, password hashing, phones, Redis client
-  app/models/       SQLAlchemy 2.0 models (User, Company, Desk, SaleEvent, Ticket)
+  app/models/       SQLAlchemy 2.0 models (User, Company, CompanyBot, Branch, Desk, SaleEvent, Ticket)
   app/services/     queue logic, ticket numbers, QR (process pool), debounced
                     broadcasts, notify routing, Telegram bot manager + handlers
-  app/api/routes/   auth, company, employees, desks, events, queue, public, ws
+  app/api/routes/   auth, company, branches, employees, desks, events, queue, public, ws
   app/main.py       API service (embedded bots in single-process dev mode)
   app/bot_main.py   bot service (webhook receiver / poller, notify consumer)
   tests/            pytest suite (queue rules + burst machinery; runs on
@@ -145,22 +153,29 @@ named volumes.
 **Telegram webhook mode (recommended for sale-day bursts):** put the stack
 behind HTTPS, set `BOT_WEBHOOK_BASE=https://smartnavbat.uz/tgwh` in `.env` and
 restart the bot service. Each company bot is registered at
-`{base}/{company_id}` with a per-company HMAC secret; without a public URL
+`{base}/{bot_id}` with a per-bot HMAC secret; without a public URL
 the bot service falls back to long polling automatically.
 
 ## Using the system
 
+Follow the order — the dashboard checklist walks through the same steps:
+
 1. **Sign up** at `/register`, create your company.
-2. **Settings** → add contact phones, locations, upload the logo, and paste the bot token from
-   **@BotFather** (`/newbot`). The token is validated via `getMe` and the bot starts polling
-   immediately — no restart needed.
-3. **Employees** → add managers and scanners; hand each the one-time generated password
-   (login = phone number).
-4. **Desks** → create numbered desks, optionally assign managers.
-5. **Events** → create the sale day with its start and the **scanning deadline**.
-6. Clients write `/start` to your bot → get their number + QR.
-7. On the day: scanners open `/scanner`, managers `/manager`, the TV opens the public
-   display link from the event page. Everything updates live.
+2. **Settings** → add contact phones, locations, upload the logo, and connect bot token(s) from
+   **@BotFather** (`/newbot`). Tokens are validated via `getMe` and the bots start polling
+   immediately — no restart needed. Connect up to 3 bots when you expect a registration rush
+   (Telegram limits one bot to ~30 msg/s; ~10 000 registrations a minute need several bots
+   working in parallel — advertise all bot links so clients spread out).
+3. **Branches** (optional) → if the company has several offices, create the branches first.
+4. **Employees** → add managers and scanners, assigning each to their branch; hand each the
+   one-time generated password (login = phone number).
+5. **Desks** → create numbered desks per branch and assign the branch's managers.
+6. **Events** → create the sale day with its start and the **scanning deadline** (both entered
+   in Tashkent local time, 24-hour format) and tick the branches it runs in — one event can run
+   in many branches, each with its own queue.
+7. Clients write `/start` to any of your bots → choose their branch → get their number + QR.
+8. On the day: scanners open `/scanner`, managers `/manager`, each branch TV opens its own
+   public display link from the event page. Everything updates live.
 
 ## API overview
 
@@ -168,9 +183,11 @@ the bot service falls back to long polling automatically.
 |---|---|---|---|
 | POST | `/api/auth/register` · `/login` | public | owner sign-up, any-user login |
 | GET | `/api/auth/me` | any | current user |
-| POST/GET/PATCH | `/api/company` (+ `/logo`, `/phones`, `/locations`) | owner | company profile, bot token |
-| CRUD | `/api/employees` (+ `/reset-password`) | owner | staff with generated passwords |
-| CRUD | `/api/desks` | owner (read: staff) | manager desks |
+| POST/GET/PATCH | `/api/company` (+ `/logo`, `/phones`, `/locations`) | owner | company profile |
+| POST/DELETE | `/api/company/bots` | owner | connect up to 3 parallel Telegram bots |
+| CRUD | `/api/branches` | owner (read: staff) | company branches |
+| CRUD | `/api/employees` (+ `/reset-password`) | owner | staff with generated passwords, per-branch |
+| CRUD | `/api/desks` | owner (read: staff) | manager desks, per-branch |
 | CRUD | `/api/events` (+ `/state`, `/tickets`, `/seed`) | owner (read: staff) | sale events |
 | POST | `/api/queue/{event}/checkin` | staff | QR code or 4-digit number |
 | POST | `/api/queue/{event}/call` · `recall` · `serving` · `skip` · `done` · `cancel` | manager/owner | desk actions |

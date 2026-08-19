@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
-from app.api.deps import CompanyEvent, DbSession, require_roles
-from app.models import Desk, Ticket, UserRole
+from app.api.deps import CompanyEvent, DbSession, ManagerUser, StaffUser, require_roles
+from app.models import Branch, Desk, Ticket, UserRole
 from app.schemas.event import CallNextRequest, CheckinRequest, TicketActionRequest, TicketOut
 from app.services import queue_service
 from app.services.errors import DomainError
@@ -24,8 +24,10 @@ def _raise(exc: DomainError) -> None:
     raise HTTPException(exc.status_code, exc.message) from None
 
 
-@router.post("/{event_id}/checkin", dependencies=[AnyStaff])
-async def check_in(payload: CheckinRequest, db: DbSession, event: CompanyEvent) -> dict:
+@router.post("/{event_id}/checkin")
+async def check_in(
+    payload: CheckinRequest, db: DbSession, event: CompanyEvent, user: StaffUser
+) -> dict:
     """QR scanned (code) or 4-digit number entered manually at the reception."""
     ticket = None
     if payload.code:
@@ -39,6 +41,19 @@ async def check_in(payload: CheckinRequest, db: DbSession, event: CompanyEvent) 
         )
     if ticket is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Bunday navbat topilmadi")
+    # branch staff must not check in a client who queued at another branch —
+    # their spot in the queue lives at that branch
+    if (
+        ticket.branch_id is not None
+        and user.branch_id is not None
+        and ticket.branch_id != user.branch_id
+    ):
+        branch = await db.get(Branch, ticket.branch_id)
+        branch_name = branch.name if branch else "boshqa"
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Bu navbat «{branch_name}» filialiga tegishli — mijoz o'sha filialga borishi kerak",
+        )
     try:
         result = await queue_service.check_in(db, event, ticket)
     except DomainError as exc:
@@ -52,11 +67,20 @@ async def check_in(payload: CheckinRequest, db: DbSession, event: CompanyEvent) 
     }
 
 
-@router.post("/{event_id}/call", dependencies=[ManagerOnly])
-async def call_next(payload: CallNextRequest, db: DbSession, event: CompanyEvent) -> dict:
+@router.post("/{event_id}/call")
+async def call_next(
+    payload: CallNextRequest, db: DbSession, event: CompanyEvent, user: ManagerUser
+) -> dict:
     desk = await db.get(Desk, payload.desk_id)
     if desk is None or desk.company_id != event.company_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Stol topilmadi")
+    # a branch manager calls only at desks of their own branch
+    if (
+        user.role == UserRole.MANAGER
+        and user.branch_id is not None
+        and desk.branch_id != user.branch_id
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Bu stol boshqa filialga tegishli")
     try:
         ticket = await queue_service.call_next(db, event, desk)
     except DomainError as exc:

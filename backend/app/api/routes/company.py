@@ -3,12 +3,22 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, DbSession, OwnCompany, require_roles
 from app.core.config import get_settings
-from app.models import Company, CompanyLocation, CompanyPhone, User, UserRole
+from app.models import (
+    MAX_BOTS_PER_COMPANY,
+    Company,
+    CompanyBot,
+    CompanyLocation,
+    CompanyPhone,
+    UserRole,
+)
 from app.schemas.company import (
+    CompanyBotCreate,
+    CompanyBotOut,
     CompanyCreate,
     CompanyLocationCreate,
     CompanyLocationOut,
@@ -37,14 +47,21 @@ async def _company_out(db: DbSession, company: Company) -> CompanyOut:
     loaded = await db.scalar(
         select(Company)
         .where(Company.id == company.id)
-        .options(selectinload(Company.phones), selectinload(Company.locations))
+        .options(
+            selectinload(Company.phones),
+            selectinload(Company.locations),
+            selectinload(Company.bots),
+        )
     )
+    bots = [CompanyBotOut.model_validate(b) for b in loaded.bots]
     return CompanyOut(
         id=loaded.id,
         name=loaded.name,
         logo_url=f"/media/{loaded.logo_path}" if loaded.logo_path else None,
-        telegram_bot_username=loaded.telegram_bot_username,
-        has_bot_token=bool(loaded.telegram_bot_token),
+        bots=bots,
+        max_bots=MAX_BOTS_PER_COMPANY,
+        has_bot_token=bool(bots),
+        telegram_bot_username=next((b.username for b in bots if b.username), None),
         phones=[CompanyPhoneOut.model_validate(p) for p in loaded.phones],
         locations=[CompanyLocationOut.model_validate(loc) for loc in loaded.locations],
     )
@@ -71,25 +88,56 @@ async def get_company(db: DbSession, company: OwnCompany) -> CompanyOut:
 async def update_company(payload: CompanyUpdate, db: DbSession, company: OwnCompany) -> CompanyOut:
     if payload.name is not None:
         company.name = payload.name.strip()
-    token_changed = payload.telegram_bot_token is not None
-    if token_changed:
-        token = payload.telegram_bot_token.strip() or None
-        settings = get_settings()
-        try:
-            if settings.multi_process:
-                # API workers never run bots: validate statelessly, the bot
-                # service picks the change up via the Redis control channel.
-                username = await validate_token(token) if token else None
-            else:
-                username = await bot_manager.set_token(company.id, token)
-        except DomainError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, exc.message) from None
-        company.telegram_bot_token = token
-        company.telegram_bot_username = username
     await db.commit()
-    if token_changed:
-        await notify_bot_token_changed(company.id)
     return await _company_out(db, company)
+
+
+@router.post("/bots", response_model=CompanyBotOut, status_code=status.HTTP_201_CREATED, dependencies=[OwnerOnly])
+async def add_bot(payload: CompanyBotCreate, db: DbSession, company: OwnCompany) -> CompanyBotOut:
+    """Connect one more Telegram bot (up to MAX_BOTS_PER_COMPANY). Several
+    bots register clients for the same events in parallel — that is how a
+    company absorbs Telegram's per-bot rate limits on big registration days."""
+    token = payload.token.strip()
+    count = len(
+        (await db.scalars(select(CompanyBot.id).where(CompanyBot.company_id == company.id))).all()
+    )
+    if count >= MAX_BOTS_PER_COMPANY:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"Ko'pi bilan {MAX_BOTS_PER_COMPANY} ta bot ulash mumkin"
+        )
+    bot = CompanyBot(company_id=company.id, token=token)
+    db.add(bot)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bu token allaqachon ulangan") from None
+    settings = get_settings()
+    try:
+        if settings.multi_process:
+            # API workers never run bots: validate statelessly, the bot
+            # service picks the change up via the Redis control channel.
+            bot.username = await validate_token(token)
+        else:
+            bot.username = await bot_manager.add_bot(bot.id, company.id, token)
+    except DomainError as exc:
+        await db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, exc.message) from None
+    await db.commit()
+    await notify_bot_token_changed(company.id)
+    return CompanyBotOut.model_validate(bot)
+
+
+@router.delete("/bots/{bot_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[OwnerOnly])
+async def delete_bot(bot_id: int, db: DbSession, company: OwnCompany) -> None:
+    bot = await db.get(CompanyBot, bot_id)
+    if bot is None or bot.company_id != company.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bot topilmadi")
+    await db.delete(bot)
+    await db.commit()
+    if not get_settings().multi_process:
+        await bot_manager.remove_bot(bot_id)
+    await notify_bot_token_changed(company.id)
 
 
 @router.post("/logo", response_model=CompanyOut, dependencies=[OwnerOnly])

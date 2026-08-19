@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import type { EventPhase, SaleEvent } from '../api/types'
-import { IconPlus } from '../components/icons'
+import type { Branch, Desk, EventPhase, SaleEvent, User } from '../api/types'
+import { useCompany } from '../components/DashboardLayout'
+import { IconCheck, IconPlus } from '../components/icons'
 import { ActionForm, Field, Modal, Spinner, useToast } from '../components/ui'
-import { formatDateTime, isoToLocalInput, localInputToIso } from '../lib/format'
+import { formatDateTime, isoToTashkentParts, tashkentPartsToIso } from '../lib/format'
 
 export const PHASE_LABEL: Record<EventPhase, { text: string; tone: string }> = {
   registration: { text: 'Ro‘yxat ochiq', tone: 'blue' },
@@ -14,15 +15,134 @@ export const PHASE_LABEL: Record<EventPhase, { text: string; tone: string }> = {
   closed: { text: 'Yopilgan', tone: 'dim' },
 }
 
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
+const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'))
+
+/** Date + 24-hour time picker fixed to Tashkent time — no AM/PM ever,
+ * whatever the operator's browser locale is. */
+function TashkentTimeField({
+  label,
+  date,
+  time,
+  onDate,
+  onTime,
+}: {
+  label: string
+  date: string
+  time: string
+  onDate: (v: string) => void
+  onTime: (v: string) => void
+}) {
+  const [hour, minute] = time.split(':')
+  const minutes = MINUTES.includes(minute) ? MINUTES : [...MINUTES, minute].sort()
+  return (
+    <div className="field">
+      <span>{label}</span>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          className="input"
+          type="date"
+          value={date}
+          onChange={(e) => onDate(e.target.value)}
+          aria-label={`${label} — sana`}
+          required
+        />
+        <select
+          className="input"
+          style={{ width: 'auto' }}
+          value={hour}
+          onChange={(e) => onTime(`${e.target.value}:${minute}`)}
+          aria-label={`${label} — soat (24 soatlik)`}
+        >
+          {HOURS.map((h) => (
+            <option key={h} value={h}>
+              {h}
+            </option>
+          ))}
+        </select>
+        <span aria-hidden="true">:</span>
+        <select
+          className="input"
+          style={{ width: 'auto' }}
+          value={minute}
+          onChange={(e) => onTime(`${hour}:${e.target.value}`)}
+          aria-label={`${label} — daqiqa`}
+        >
+          {minutes.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+interface EventForm {
+  name: string
+  starts_date: string
+  starts_time: string
+  checkin_date: string
+  checkin_time: string
+  branch_ids: number[]
+}
+
+const EMPTY_FORM: EventForm = {
+  name: '',
+  starts_date: '',
+  starts_time: '09:00',
+  checkin_date: '',
+  checkin_time: '10:00',
+  branch_ids: [],
+}
+
 export default function EventsPage() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const { data: company } = useCompany()
   const { data: events, isLoading } = useQuery({
     queryKey: ['events'],
     queryFn: () => api<SaleEvent[]>('/events'),
   })
+  const { data: branches } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => api<Branch[]>('/branches'),
+  })
+  const { data: employees } = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => api<User[]>('/employees'),
+  })
+  const { data: desks } = useQuery({ queryKey: ['desks'], queryFn: () => api<Desk[]>('/desks') })
   const [editing, setEditing] = useState<SaleEvent | 'new' | null>(null)
-  const [form, setForm] = useState({ name: '', starts_at: '', checkin_until: '' })
+  const [form, setForm] = useState<EventForm>(EMPTY_FORM)
+
+  const hasBranches = (branches?.length ?? 0) > 0
+
+  // the setup flow the product expects: settings (bot) → branches (if any) →
+  // managers → desks; only then a tadbir makes sense
+  const setupSteps = [
+    {
+      done: !!company?.has_bot_token,
+      label: 'Sozlamalarda Telegram bot ulang',
+      to: '/dashboard/settings',
+    },
+    {
+      done: (employees ?? []).some((e) => e.role === 'manager' && e.is_active),
+      label: hasBranches ? 'Har bir filialga menejer qo‘shing' : 'Menejer qo‘shing',
+      to: '/dashboard/employees',
+    },
+    {
+      done: (desks?.length ?? 0) > 0,
+      label: hasBranches
+        ? 'Filiallarga stollar yaratib, menejer biriktiring'
+        : 'Stol yaratib, menejer biriktiring',
+      to: '/dashboard/desks',
+    },
+  ]
+  const setupLoaded = company !== undefined && employees !== undefined && desks !== undefined
+  const missingSteps = setupLoaded ? setupSteps.filter((s) => !s.done) : []
+  const setupReady = setupLoaded && missingSteps.length === 0
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['events'] })
   const toggleActive = useMutation({
@@ -44,16 +164,29 @@ export default function EventsPage() {
   })
 
   const openNew = () => {
-    setForm({ name: '', starts_at: '', checkin_until: '' })
+    setForm({ ...EMPTY_FORM, branch_ids: (branches ?? []).map((b) => b.id) })
     setEditing('new')
   }
   const openEdit = (event: SaleEvent) => {
+    const starts = isoToTashkentParts(event.starts_at)
+    const checkin = isoToTashkentParts(event.checkin_until)
     setForm({
       name: event.name,
-      starts_at: isoToLocalInput(event.starts_at),
-      checkin_until: isoToLocalInput(event.checkin_until),
+      starts_date: starts.date,
+      starts_time: starts.time,
+      checkin_date: checkin.date,
+      checkin_time: checkin.time,
+      branch_ids: event.branches.map((b) => b.id),
     })
     setEditing(event)
+  }
+  const toggleBranch = (id: number) => {
+    setForm((f) => ({
+      ...f,
+      branch_ids: f.branch_ids.includes(id)
+        ? f.branch_ids.filter((b) => b !== id)
+        : [...f.branch_ids, id],
+    }))
   }
 
   return (
@@ -66,10 +199,40 @@ export default function EventsPage() {
             navbat ro‘yxatdan o‘tish vaqti bo‘yicha boshlanadi
           </div>
         </div>
-        <button className="btn" onClick={openNew}>
+        <button
+          className="btn"
+          onClick={openNew}
+          disabled={!setupReady}
+          title={setupReady ? undefined : 'Avval quyidagi tayyorgarlik qadamlarini bajaring'}
+        >
           <IconPlus size={16} /> Tadbir qo‘shish
         </button>
       </div>
+
+      {setupLoaded && !setupReady && (
+        <div className="card" style={{ borderColor: 'var(--amber)' }}>
+          <div className="card-title">Tadbir yaratishdan oldin</div>
+          <p className="hint" style={{ marginBottom: 10 }}>
+            Tartib: avval Sozlamalar, keyin (bo‘lsa) Filiallar, so‘ng Menejerlar va Stollar —
+            shundan keyin tadbir e’lon qilinadi.
+          </p>
+          {setupSteps.map((step) => (
+            <div className="check-row" key={step.label}>
+              <span className={`lbl${step.done ? ' done-text' : ''}`}>
+                <span className={`mark ${step.done ? 'done' : 'todo'}`}>
+                  <IconCheck size={13} />
+                </span>
+                {step.label}
+              </span>
+              {!step.done && (
+                <Link className="btn tonal sm" to={step.to}>
+                  Bajarish
+                </Link>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card">
         {isLoading ? (
@@ -85,6 +248,7 @@ export default function EventsPage() {
               <thead>
                 <tr>
                   <th>Tadbir</th>
+                  {hasBranches && <th>Filiallar</th>}
                   <th>Boshlanish</th>
                   <th>Skanerlash tugashi</th>
                   <th>Holat</th>
@@ -102,6 +266,19 @@ export default function EventsPage() {
                           {event.name}
                         </Link>
                       </td>
+                      {hasBranches && (
+                        <td>
+                          {event.branches.length ? (
+                            event.branches.map((b) => (
+                              <span key={b.id} className="badge blue" style={{ marginRight: 4 }}>
+                                {b.name}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                      )}
                       <td className="muted">{formatDateTime(event.starts_at)}</td>
                       <td className="muted">{formatDateTime(event.checkin_until)}</td>
                       <td>
@@ -152,8 +329,9 @@ export default function EventsPage() {
             onSubmit={async () => {
               const payload = {
                 name: form.name,
-                starts_at: localInputToIso(form.starts_at),
-                checkin_until: localInputToIso(form.checkin_until),
+                starts_at: tashkentPartsToIso(form.starts_date, form.starts_time),
+                checkin_until: tashkentPartsToIso(form.checkin_date, form.checkin_time),
+                branch_ids: form.branch_ids,
               }
               if (editing === 'new') await api<SaleEvent>('/events', { body: payload })
               else await api<SaleEvent>(`/events/${editing.id}`, { method: 'PATCH', body: payload })
@@ -173,24 +351,48 @@ export default function EventsPage() {
                     minLength={2}
                   />
                 </Field>
-                <Field label="Sotuv boshlanish vaqti">
-                  <input
-                    className="input"
-                    type="datetime-local"
-                    value={form.starts_at}
-                    onChange={(e) => setForm((f) => ({ ...f, starts_at: e.target.value }))}
-                    required
-                  />
-                </Field>
-                <Field label="QR skanerlash tugash vaqti (navbat shu paytda boshlanadi)">
-                  <input
-                    className="input"
-                    type="datetime-local"
-                    value={form.checkin_until}
-                    onChange={(e) => setForm((f) => ({ ...f, checkin_until: e.target.value }))}
-                    required
-                  />
-                </Field>
+                <TashkentTimeField
+                  label="Sotuv boshlanish vaqti (Toshkent vaqti, 24 soatlik)"
+                  date={form.starts_date}
+                  time={form.starts_time}
+                  onDate={(v) => setForm((f) => ({ ...f, starts_date: v, checkin_date: f.checkin_date || v }))}
+                  onTime={(v) => setForm((f) => ({ ...f, starts_time: v }))}
+                />
+                <TashkentTimeField
+                  label="QR skanerlash tugash vaqti — navbat shu paytda boshlanadi (Toshkent vaqti, 24 soatlik)"
+                  date={form.checkin_date}
+                  time={form.checkin_time}
+                  onDate={(v) => setForm((f) => ({ ...f, checkin_date: v }))}
+                  onTime={(v) => setForm((f) => ({ ...f, checkin_time: v }))}
+                />
+                {hasBranches && (
+                  <div className="field">
+                    <span>Filiallar (bir nechtasini tanlash mumkin)</span>
+                    {(branches ?? []).map((b) => (
+                      <label
+                        key={b.id}
+                        style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.branch_ids.includes(b.id)}
+                          onChange={() => toggleBranch(b.id)}
+                        />
+                        <span>
+                          {b.name}{' '}
+                          <span className="muted">
+                            · {b.desk_count} stol · {b.employee_count} xodim
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                    <p className="hint">
+                      Bitta tadbir bir nechta filialda o‘tadi: mijoz botda filialni tanlaydi,
+                      navbat va stollar har filialda alohida yuritiladi. Tanlangan har bir
+                      filialda kamida bitta stol bo‘lsin.
+                    </p>
+                  </div>
+                )}
                 <p className="hint">
                   Shu vaqtgacha kelgan mijozlar QR kodini skanerlatadi. Vaqt tugagach chaqiruv
                   boshlanadi: tartib — botdan ro‘yxatdan o‘tish vaqti bo‘yicha, faqat skanerdan

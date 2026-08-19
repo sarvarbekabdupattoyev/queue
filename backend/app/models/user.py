@@ -20,6 +20,10 @@ class User(Base):
     company_id: Mapped[int | None] = mapped_column(
         ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    # branch the employee works at; NULL = whole company (owners, single-office)
+    branch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now_utc)
 
     company: Mapped["Company | None"] = relationship(  # noqa: F821

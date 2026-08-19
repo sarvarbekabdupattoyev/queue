@@ -21,6 +21,14 @@ export default function SettingsPage() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['company'] })
 
+  const deleteBot = useMutation({
+    mutationFn: (id: number) => api(`/company/bots/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      invalidate()
+      toast('Bot o‘chirildi')
+    },
+    onError: (e: Error) => toast(e.message, true),
+  })
   const uploadLogo = useMutation({
     mutationFn: (file: File) => {
       const formData = new FormData()
@@ -105,49 +113,81 @@ export default function SettingsPage() {
         </div>
 
         <div className="card">
-          <div className="card-title">Telegram bot</div>
-          {company.has_bot_token ? (
-            <p style={{ marginBottom: 10 }}>
-              Bot ulangan:{' '}
-              {company.telegram_bot_username ? (
-                <a href={`https://t.me/${company.telegram_bot_username}`} target="_blank" rel="noreferrer">
-                  @{company.telegram_bot_username}
-                </a>
-              ) : (
-                <span className="badge amber">token saqlangan, bot hozircha ishga tushmagan</span>
-              )}
-            </p>
-          ) : (
+          <div className="card-title">
+            <span>Telegram botlar</span>
+            <span className="mono">
+              {company.bots.length}/{company.max_bots}
+            </span>
+          </div>
+          {company.bots.length === 0 ? (
             <p className="hint" style={{ marginBottom: 10 }}>
               Mijozlar ro‘yxatdan o‘tishi uchun bot kerak: Telegramda <b>@BotFather</b> ga{' '}
               <code>/newbot</code> yozing va olingan tokenni shu yerga qo‘ying.
             </p>
-          )}
-          <ActionForm
-            onSubmit={async () => {
-              await api<Company>('/company', { method: 'PATCH', body: { telegram_bot_token: botToken } })
-              setBotToken('')
-              invalidate()
-              toast(botToken ? 'Bot token saqlandi' : 'Bot o‘chirildi')
-            }}
-          >
-            {(busy, error) => (
-              <>
-                <Field label={company.has_bot_token ? 'Yangi token (bo‘sh yuborsangiz bot o‘chadi)' : 'Bot token'}>
-                  <input
-                    className="input"
-                    value={botToken}
-                    onChange={(e) => setBotToken(e.target.value)}
-                    placeholder="123456789:AAH..."
-                  />
-                </Field>
-                {error && <div className="error-text">{error}</div>}
-                <button className="btn" disabled={busy}>
-                  {busy ? 'Tekshirilmoqda…' : 'Saqlash'}
+          ) : (
+            company.bots.map((bot) => (
+              <div className="list-row" key={bot.id}>
+                <span>
+                  {bot.username ? (
+                    <a href={`https://t.me/${bot.username}`} target="_blank" rel="noreferrer">
+                      @{bot.username}
+                    </a>
+                  ) : (
+                    <span className="badge amber">token saqlangan, bot hozircha ishga tushmagan</span>
+                  )}
+                </span>
+                <button
+                  className="btn danger-ghost sm"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `${bot.username ? `@${bot.username}` : 'Bot'} o‘chirilsinmi? U orqali yozilgan mijozlarga xabarlar boshqa bot orqali yetmasligi mumkin.`,
+                      )
+                    )
+                      deleteBot.mutate(bot.id)
+                  }}
+                >
+                  O‘chirish
                 </button>
-              </>
-            )}
-          </ActionForm>
+              </div>
+            ))
+          )}
+          {company.bots.length < company.max_bots && (
+            <ActionForm
+              onSubmit={async () => {
+                await api('/company/bots', { body: { token: botToken } })
+                setBotToken('')
+                invalidate()
+                toast('Bot ulandi')
+              }}
+            >
+              {(busy, error) => (
+                <div style={{ marginTop: 10 }}>
+                  <Field label={company.bots.length === 0 ? 'Bot token' : 'Qo‘shimcha bot tokeni'}>
+                    <input
+                      className="input"
+                      value={botToken}
+                      onChange={(e) => setBotToken(e.target.value)}
+                      placeholder="123456789:AAH..."
+                      required
+                      minLength={10}
+                    />
+                  </Field>
+                  {error && <div className="error-text">{error}</div>}
+                  <button className="btn" disabled={busy}>
+                    {busy ? 'Tekshirilmoqda…' : 'Bot qo‘shish'}
+                  </button>
+                </div>
+              )}
+            </ActionForm>
+          )}
+          <p className="hint" style={{ marginTop: 12 }}>
+            <b>Katta oqim kutilyaptimi?</b> Telegram bitta botga sekundiga ~30 ta xabar ruxsat
+            beradi. Ro‘yxatdan o‘tish kunida daqiqasiga 10 000 tagacha ariza kelishi mumkin —
+            buning uchun {company.max_bots} tagacha bot ulang: ularning hammasi bitta navbat uchun
+            parallel ishlaydi. E’lonlaringizda bir nechta bot havolasini tarqating, mijozlar
+            bo‘linib yoziladi. Har bir mijozga xabarlar o‘zi yozilgan bot orqali boradi.
+          </p>
         </div>
 
         <div className="card">

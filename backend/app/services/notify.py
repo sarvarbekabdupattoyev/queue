@@ -15,13 +15,25 @@ from app.core.redis import CH_BOT_CONTROL, CH_NOTIFY, get_redis
 log = logging.getLogger(__name__)
 
 
-async def send_telegram_text(company_id: int, chat_id: int, text: str) -> None:
+async def send_telegram_text(
+    company_id: int, chat_id: int, text: str, bot_id: int | None = None
+) -> None:
+    """``bot_id`` is the CompanyBot the client registered through — messages
+    go out via that bot when it is running (other bots of the company may not
+    be allowed to message the client)."""
     redis = get_redis()
     if redis is not None:
         try:
             await redis.publish(
                 CH_NOTIFY,
-                json.dumps({"company_id": company_id, "chat_id": chat_id, "text": text}),
+                json.dumps(
+                    {
+                        "company_id": company_id,
+                        "chat_id": chat_id,
+                        "text": text,
+                        "bot_id": bot_id,
+                    }
+                ),
             )
         except Exception as exc:
             log.warning("Failed to publish Telegram notification: %s", exc)
@@ -31,12 +43,12 @@ async def send_telegram_text(company_id: int, chat_id: int, text: str) -> None:
 
     # fire-and-forget: bot_manager.send_text logs failures itself
     asyncio.get_running_loop().create_task(
-        bot_manager.send_text(company_id, chat_id, text)
+        bot_manager.send_text(company_id, chat_id, text, bot_id)
     )
 
 
 async def notify_bot_token_changed(company_id: int) -> None:
-    """Tell the bot service to reload one company's bot (multi-process only)."""
+    """Tell the bot service to reload one company's bots (multi-process only)."""
     redis = get_redis()
     if redis is None:
         return

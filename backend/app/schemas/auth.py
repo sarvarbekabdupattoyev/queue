@@ -35,6 +35,7 @@ class UserOut(BaseModel):
     last_name: str
     role: UserRole
     company_id: int | None
+    branch_id: int | None = None
     is_active: bool
 
 

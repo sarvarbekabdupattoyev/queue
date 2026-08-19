@@ -29,11 +29,20 @@ export default function ManagerPage() {
   })
   const [busy, setBusy] = useState(false)
 
-  const { data: desks } = useQuery({ queryKey: ['desks'], queryFn: () => api<Desk[]>('/desks') })
+  const { data: allDesks } = useQuery({ queryKey: ['desks'], queryFn: () => api<Desk[]>('/desks') })
+  // a branch manager works only with their branch's desks
+  const desks = useMemo(
+    () =>
+      (allDesks ?? []).filter(
+        (d) => user?.branch_id == null || d.branch_id === user.branch_id,
+      ),
+    [allDesks, user],
+  )
 
   // prefer the desk assigned to this manager
   useEffect(() => {
-    if (deskId === null && desks?.length) {
+    if (desks.length === 0) return
+    if (deskId === null || !desks.some((d) => d.id === deskId)) {
       const mine = desks.find((d) => d.manager_id === user?.id)
       setDeskId((mine ?? desks[0]).id)
     }
@@ -53,13 +62,22 @@ export default function ManagerPage() {
     eventId ? () => api<StaffState>(`/events/${eventId}/state`) : null,
   )
 
-  const desk = desks?.find((d) => d.id === deskId) ?? null
+  const desk = desks.find((d) => d.id === deskId) ?? null
   const mine = useMemo(
     () => state?.active?.find((t) => t.desk_id === deskId) ?? null,
     [state, deskId],
   )
-  const others = state?.active?.filter((t) => t.desk_id !== deskId) ?? []
-  const waiting = state?.waiting_list ?? []
+  // branch events: this desk serves only its own branch's slice of the queue
+  const eventHasBranches = (state?.event.branches?.length ?? 0) > 0
+  const branchScope = eventHasBranches ? (desk?.branch_id ?? null) : null
+  const inScope = (t: { branch_id: number | null }) =>
+    branchScope === null || t.branch_id === branchScope
+  const others = state?.active?.filter((t) => t.desk_id !== deskId && inScope(t)) ?? []
+  const waiting = (state?.waiting_list ?? []).filter(inScope)
+  const stats =
+    branchScope !== null
+      ? (state?.by_branch.find((b) => b.id === branchScope)?.stats ?? state?.stats)
+      : state?.stats
   const timeoutMs = (state?.call_timeout_minutes ?? 3) * 60000
   const queueStarted = state ? state.event.phase === 'queue' : false
   const untilQueue = state ? new Date(state.event.checkin_until).getTime() - now : 0
@@ -91,9 +109,11 @@ export default function ManagerPage() {
           style={{ width: 'auto' }}
           value={deskId ?? ''}
           onChange={(e) => selectDesk(Number(e.target.value))}
+          aria-label="Stol"
         >
-          {(desks ?? []).map((d) => (
+          {desks.map((d) => (
             <option key={d.id} value={d.id}>
+              {d.branch_name ? `${d.branch_name} · ` : ''}
               {d.number}-stol{d.manager_id === user?.id ? ' (mening)' : ''}
             </option>
           ))}
@@ -106,8 +126,18 @@ export default function ManagerPage() {
             <div className="card">
               <div className="card-title">
                 <span>Mening stolim</span>
-                <span>{desk ? `${desk.number}-stol` : ''}</span>
+                <span>
+                  {desk
+                    ? `${desk.branch_name ? `${desk.branch_name} · ` : ''}${desk.number}-stol`
+                    : ''}
+                </span>
               </div>
+              {eventHasBranches && desk && desk.branch_id === null && (
+                <p className="hint" style={{ marginBottom: 12, color: 'var(--amber)' }}>
+                  Bu tadbir filiallarda o‘tkazilmoqda, lekin bu stol filialga biriktirilmagan —
+                  chaqirish uchun rahbar stolni filialga biriktirishi kerak.
+                </p>
+              )}
               {!queueStarted && state && (
                 <p className="hint" style={{ marginBottom: 12 }}>
                   Navbat hali boshlanmagan — skanerlash tugashiga{' '}
@@ -174,22 +204,22 @@ export default function ManagerPage() {
                   <IconFlag size={18} /> Yakunlash
                 </button>
               </div>
-              {state && (
+              {stats && (
                 <div className="stat-row" style={{ marginTop: 14 }}>
                   <div className="stat">
-                    <b>{state.stats.registered}</b>
+                    <b>{stats.registered}</b>
                     <span>Yozilgan</span>
                   </div>
                   <div className="stat">
-                    <b>{state.stats.arrived}</b>
+                    <b>{stats.arrived}</b>
                     <span>Kelgan</span>
                   </div>
                   <div className="stat">
-                    <b>{state.stats.waiting}</b>
+                    <b>{stats.waiting}</b>
                     <span>Kutmoqda</span>
                   </div>
                   <div className="stat">
-                    <b>{state.stats.done}</b>
+                    <b>{stats.done}</b>
                     <span>Yakunlandi</span>
                   </div>
                 </div>
@@ -217,7 +247,9 @@ export default function ManagerPage() {
 
           <div className="card">
             <div className="card-title">
-              <span>Navbatda (kelganlar)</span>
+              <span>
+                Navbatda (kelganlar{branchScope !== null && desk?.branch_name ? ` · ${desk.branch_name}` : ''})
+              </span>
               <span>{waiting.length ? `${waiting.length} kishi` : ''}</span>
             </div>
             {waiting.length === 0 ? (
