@@ -149,6 +149,54 @@ async def test_employee_lifecycle_and_roles(client):
     assert blocked.status_code == 403
 
 
+async def test_employee_full_edit_including_phone(client):
+    token = (await register_owner(client))["access_token"]
+    await create_company(client, token)
+    created = await client.post(
+        "/api/employees",
+        json={"first_name": "Malika", "last_name": "Yusupova", "phone": "+998909998877", "role": "manager"},
+        headers=auth(token),
+    )
+    employee_id = created.json()["employee"]["id"]
+    password = created.json()["password"]
+    other = await client.post(
+        "/api/employees",
+        json={"first_name": "Aziz", "phone": "+998901112233", "role": "scanner"},
+        headers=auth(token),
+    )
+    assert other.status_code == 201
+
+    # the owner can change ANY field, phone included
+    updated = await client.patch(
+        f"/api/employees/{employee_id}",
+        json={"first_name": "Madina", "last_name": "Karimova", "phone": "+998905554433", "role": "scanner"},
+        headers=auth(token),
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert (body["first_name"], body["last_name"], body["phone"], body["role"]) == (
+        "Madina", "Karimova", "+998905554433", "scanner",
+    )
+
+    # login follows the phone: the new one works, the old one is gone
+    assert (
+        await client.post("/api/auth/login", json={"phone": "+998905554433", "password": password})
+    ).status_code == 200
+    assert (
+        await client.post("/api/auth/login", json={"phone": "+998909998877", "password": password})
+    ).status_code == 401
+
+    # a phone already used inside the company is rejected
+    conflict = await client.patch(
+        f"/api/employees/{employee_id}", json={"phone": "+998901112233"}, headers=auth(token)
+    )
+    assert conflict.status_code == 409
+    invalid = await client.patch(
+        f"/api/employees/{employee_id}", json={"phone": "+7 900 000 00 00"}, headers=auth(token)
+    )
+    assert invalid.status_code == 422
+
+
 async def test_same_employee_phone_allowed_across_companies(client):
     """A phone is unique inside ONE company: two different clients (companies)
     may each add the same person as their manager."""

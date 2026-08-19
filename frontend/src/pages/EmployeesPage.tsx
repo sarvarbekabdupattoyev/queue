@@ -64,6 +64,7 @@ export default function EmployeesPage() {
   })
   const hasBranches = (branches?.length ?? 0) > 0
   const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<User | null>(null)
   const [reveal, setReveal] = useState<EmployeeWithPassword | null>(null)
   const [form, setForm] = useState({
     first_name: '',
@@ -72,6 +73,22 @@ export default function EmployeesPage() {
     role: 'manager' as Role,
     branch_id: '',
   })
+  const [editForm, setEditForm] = useState({
+    first_name: '',
+    last_name: '',
+    phone: '',
+    role: 'manager' as Role,
+  })
+
+  const openEdit = (employee: User) => {
+    setEditForm({
+      first_name: employee.first_name,
+      last_name: employee.last_name,
+      phone: employee.phone,
+      role: employee.role,
+    })
+    setEditing(employee)
+  }
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['employees'] })
 
@@ -194,6 +211,9 @@ export default function EmployeesPage() {
                     </td>
                     <td>
                       <span className="row-actions">
+                        <button className="btn ghost sm" onClick={() => openEdit(employee)}>
+                          Tahrirlash
+                        </button>
                         <button
                           className="btn ghost sm"
                           onClick={() => resetPassword.mutate(employee)}
@@ -308,6 +328,78 @@ export default function EmployeesPage() {
                   </button>
                   <button className="btn" disabled={busy}>
                     {busy ? 'Qo‘shilmoqda…' : 'Qo‘shish'}
+                  </button>
+                </div>
+              </>
+            )}
+          </ActionForm>
+        </Modal>
+      )}
+
+      {editing && (
+        <Modal
+          title={`${editing.first_name} — tahrirlash`}
+          description="Xodimning istalgan ma’lumotini o‘zgartirish mumkin. Telefon — kirish logini."
+          onClose={() => setEditing(null)}
+        >
+          <ActionForm
+            onSubmit={async () => {
+              await api<User>(`/employees/${editing.id}`, {
+                method: 'PATCH',
+                body: {
+                  first_name: editForm.first_name,
+                  last_name: editForm.last_name,
+                  phone: editForm.phone,
+                  role: editForm.role,
+                },
+              })
+              setEditing(null)
+              invalidate()
+            }}
+          >
+            {(busy, error) => (
+              <>
+                <Field label="Ism">
+                  <input
+                    className="input"
+                    value={editForm.first_name}
+                    onChange={(e) => setEditForm((f) => ({ ...f, first_name: e.target.value }))}
+                    required
+                    minLength={2}
+                  />
+                </Field>
+                <Field label="Familiya">
+                  <input
+                    className="input"
+                    value={editForm.last_name}
+                    onChange={(e) => setEditForm((f) => ({ ...f, last_name: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Telefon raqam (login sifatida ishlatiladi)">
+                  <input
+                    className="input"
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                    required
+                  />
+                </Field>
+                <Field label="Rol">
+                  <select
+                    className="input"
+                    value={editForm.role}
+                    onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as Role }))}
+                  >
+                    <option value="manager">Menejer (stolda mijoz qabul qiladi)</option>
+                    <option value="scanner">QR skaner (qabulxonada belgilaydi)</option>
+                  </select>
+                </Field>
+                {error && <div className="error-text">{error}</div>}
+                <div className="modal-actions">
+                  <button type="button" className="btn ghost" onClick={() => setEditing(null)}>
+                    Bekor qilish
+                  </button>
+                  <button className="btn" disabled={busy}>
+                    {busy ? 'Saqlanmoqda…' : 'Saqlash'}
                   </button>
                 </div>
               </>

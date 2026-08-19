@@ -92,7 +92,8 @@ async def create_employee(
 async def update_employee(
     employee_id: int, payload: EmployeeUpdate, db: DbSession, company: OwnCompany
 ) -> UserOut:
-    employee = await _get_employee(db, company.id, employee_id)
+    company_id = company.id
+    employee = await _get_employee(db, company_id, employee_id)
     if payload.role is not None:
         if payload.role not in EMPLOYEE_ROLES:
             raise HTTPException(
@@ -103,14 +104,34 @@ async def update_employee(
         employee.first_name = payload.first_name.strip()
     if payload.last_name is not None:
         employee.last_name = payload.last_name.strip()
+    if payload.phone is not None and payload.phone != employee.phone:
+        taken = await db.scalar(
+            select(User.id).where(
+                User.phone == payload.phone,
+                User.company_id == company_id,
+                User.id != employee.id,
+            )
+        )
+        if taken is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Bu raqam kompaniyangizda allaqachon ro'yxatdan o'tgan"
+            )
+        employee.phone = payload.phone
     if payload.is_active is not None:
         employee.is_active = payload.is_active
     if payload.clear_branch:
         employee.branch_id = None
     elif payload.branch_id is not None:
-        await _validate_branch(db, company.id, payload.branch_id)
+        await _validate_branch(db, company_id, payload.branch_id)
         employee.branch_id = payload.branch_id
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # lost a race with another edit adding the same phone to this company
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Bu raqam kompaniyangizda allaqachon ro'yxatdan o'tgan"
+        ) from None
     await db.refresh(employee)
     return UserOut.model_validate(employee)
 

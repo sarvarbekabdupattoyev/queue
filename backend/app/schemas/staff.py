@@ -1,5 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.phone import normalize_phone
 from app.models.enums import UserRole
 from app.schemas.auth import PhoneMixin, UserOut
 
@@ -17,10 +18,21 @@ class EmployeeCreate(PhoneMixin):
 class EmployeeUpdate(BaseModel):
     first_name: str | None = Field(default=None, min_length=2, max_length=64)
     last_name: str | None = Field(default=None, max_length=64)
+    phone: str | None = None
     role: UserRole | None = None
     is_active: bool | None = None
     branch_id: int | None = None
     clear_branch: bool = False
+
+    @field_validator("phone")
+    @classmethod
+    def _normalize_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        normalized = normalize_phone(v)
+        if not normalized:
+            raise ValueError("Telefon raqami noto'g'ri. Format: +998 XX XXX XX XX")
+        return normalized
 
 
 class EmployeeWithPassword(BaseModel):
