@@ -1,11 +1,11 @@
 """Queue domain logic.
 
-Ordering rule (the product's core): clients get a random 4-digit number from
-the Telegram bot when they register. On the sale day they check in (QR scan or
-manual number entry) until ``event.checkin_until``. When that moment passes the
-queue starts, and the order among checked-in tickets is the **bot registration
-time** — not the number and not the arrival time. Tickets checked in after the
-deadline (or returning after a skip) join the end-of-day group.
+Ordering rule (the product's core): clients get a random 4-letter uppercase
+code from the Telegram bot when they register. On the sale day they check in
+(QR scan or manual code entry) until ``event.checkin_until``. When that moment
+passes the queue starts, and the order among checked-in tickets is the **bot
+registration time** — not the code and not the arrival time. Tickets checked
+in after the deadline (or returning after a skip) join the end-of-day group.
 
 Side effects of every action are decoupled from the request path:
 state broadcasts are debounced (`app.services.broadcast`) and Telegram
@@ -110,12 +110,12 @@ async def position_of(db: AsyncSession, ticket: Ticket) -> int | None:
     return (ahead or 0) + 1
 
 
-async def get_ticket_by_number(db: AsyncSession, event_id: int, number: int) -> Ticket:
+async def get_ticket_by_number(db: AsyncSession, event_id: int, number: str) -> Ticket:
     ticket = await db.scalar(
         select(Ticket).where(Ticket.event_id == event_id, Ticket.number == number)
     )
     if ticket is None:
-        raise NotFoundError("Bunday raqamli navbat topilmadi")
+        raise NotFoundError("Bunday kodli navbat topilmadi")
     return ticket
 
 
@@ -196,13 +196,23 @@ async def build_states(
     stats, branch_stats = await _stats_by_branch(db, event.id)
     settings = get_settings()
 
+    def queue_entry(t: Ticket) -> dict[str, Any]:
+        """What the TV board shows per waiting ticket: the 4-letter code, the
+        client's name and the exact bot registration moment (milliseconds —
+        it IS the queue order, so the board makes the ordering verifiable)."""
+        return {
+            "number": t.number,
+            "name": t.full_name,
+            "registered_at": t.registered_at.isoformat(timespec="milliseconds"),
+            "late": t.late,
+        }
+
     def branch_section(branch_id: int) -> dict[str, Any]:
         mine = [t for t in waiting if t.branch_id == branch_id]
         return {
             "id": branch_id,
             "name": branch_names.get(branch_id, ""),
-            "next": [t.number for t in mine[:12]],
-            "late_numbers": [t.number for t in mine[:12] if t.late],
+            "next": [queue_entry(t) for t in mine[:12]],
             "stats": branch_stats.get(branch_id, _stats_from({})),
         }
 
@@ -214,6 +224,7 @@ async def build_states(
         "called": [
             {
                 "number": t.number,
+                "name": t.full_name,
                 "desk_number": desk_numbers.get(t.desk_id),
                 "branch_id": t.branch_id,
                 "status": t.status.value,
@@ -221,8 +232,7 @@ async def build_states(
             }
             for t in active
         ],
-        "next": [t.number for t in waiting[:12]],
-        "late_numbers": [t.number for t in waiting[:12] if t.late],
+        "next": [queue_entry(t) for t in waiting[:12]],
         "by_branch": [branch_section(b.id) for b in branches],
         "stats": stats,
     }

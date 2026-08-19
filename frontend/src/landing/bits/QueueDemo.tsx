@@ -5,16 +5,16 @@ import { useLang } from '../../i18n'
 interface Person {
   id: string
   name: string
-  number: number
+  number: string
   regTime: string
   scanned: boolean
 }
 
 const PEOPLE: Person[] = [
-  { id: 'a', name: 'Aziza', number: 4821, regTime: '09:01', scanned: true },
-  { id: 'b', name: 'Bekzod', number: 7203, regTime: '09:14', scanned: false },
-  { id: 'c', name: 'Kamola', number: 1544, regTime: '09:32', scanned: true },
-  { id: 'd', name: 'Doston', number: 9067, regTime: '10:05', scanned: true },
+  { id: 'a', name: 'Aziza', number: 'KRTA', regTime: '09:01', scanned: true },
+  { id: 'b', name: 'Bekzod', number: 'WZQN', regTime: '09:14', scanned: false },
+  { id: 'c', name: 'Kamola', number: 'DFHM', regTime: '09:32', scanned: true },
+  { id: 'd', name: 'Doston', number: 'PXLE', regTime: '10:05', scanned: true },
 ]
 
 // phase 0: registration order · phase 1: arrival order · phase 2: final queue

@@ -128,7 +128,8 @@ async def test_one_event_runs_in_many_branches_with_separate_queues(client):
     assert per_branch[branch_a["id"]] == [t_a1["number"], t_a2["number"]]
     assert per_branch[branch_b["id"]] == [t_b1["number"], t_b2["number"]]
     by_branch = {s["id"]: s for s in state["by_branch"]}
-    assert by_branch[branch_a["id"]]["next"] == [t_a1["number"], t_a2["number"]]
+    next_a = [entry["number"] for entry in by_branch[branch_a["id"]]["next"]]
+    assert next_a == [t_a1["number"], t_a2["number"]]
     assert by_branch[branch_b["id"]]["stats"]["waiting"] == 2
 
     # positions are branch-local: b2 is 2nd in Sergeli even though 3 people

@@ -28,6 +28,14 @@ export function formatTime(iso: string): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
 }
 
+/** "HH:MM:SS.mmm" — the bot registration moment. Milliseconds matter: they
+ * ARE the queue order, so the board shows them for verifiable fairness. */
+export function formatTimeMs(iso: string): string {
+  const d = tashkentClock(iso)
+  const ms = String(d.getUTCMilliseconds()).padStart(3, '0')
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${ms}`
+}
+
 /** ISO → {date: "YYYY-MM-DD", time: "HH:MM"} in Tashkent wall-clock time. */
 export function isoToTashkentParts(iso: string): { date: string; time: string } {
   const d = tashkentClock(iso)

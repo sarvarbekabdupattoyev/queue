@@ -46,8 +46,8 @@ class Ticket(Base):
     bot_id: Mapped[int | None] = mapped_column(
         ForeignKey("company_bots.id", ondelete="SET NULL"), nullable=True
     )
-    # random (non-sequential) 4-digit queue number, unique within the event
-    number: Mapped[int] = mapped_column(Integer)
+    # random (non-sequential) 4-letter uppercase code, unique within the event
+    number: Mapped[str] = mapped_column(String(4))
     # opaque code embedded in the QR image, globally unique
     code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
 

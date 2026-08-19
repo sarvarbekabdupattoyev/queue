@@ -100,7 +100,7 @@ export interface SaleEvent {
 
 export interface Ticket {
   id: number
-  number: number
+  number: string
   code: string
   first_name: string
   last_name: string
@@ -121,7 +121,7 @@ export interface Ticket {
 
 export interface StaffTicketView {
   id: number
-  number: number
+  number: string
   name: string
   phone: string
   status: TicketStatus
@@ -144,11 +144,19 @@ export interface QueueStats {
   skipped: number
 }
 
+/** One waiting ticket as the public TV board shows it: the 4-letter code,
+ * the client's name and the exact bot registration moment (with ms). */
+export interface QueueNextEntry {
+  number: string
+  name: string
+  registered_at: string
+  late: boolean
+}
+
 export interface BranchQueueState {
   id: number
   name: string
-  next: number[]
-  late_numbers: number[]
+  next: QueueNextEntry[]
   stats: QueueStats
 }
 
@@ -167,14 +175,14 @@ export interface PublicState {
   now: string
   call_timeout_minutes: number
   called: {
-    number: number
+    number: string
+    name: string
     desk_number: number | null
     branch_id: number | null
     status: TicketStatus
     called_at: string | null
   }[]
-  next: number[]
-  late_numbers: number[]
+  next: QueueNextEntry[]
   by_branch: BranchQueueState[]
   stats: QueueStats
 }
@@ -246,7 +254,7 @@ export interface StatsOverview {
 }
 
 export interface PublicTicket {
-  number: number
+  number: string
   first_name: string
   status: TicketStatus
   late: boolean

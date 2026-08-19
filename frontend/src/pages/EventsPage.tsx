@@ -234,7 +234,7 @@ export default function EventsPage() {
     <>
       <div className="page-actions">
         <span className="hint">
-          Bot tadbir boshlanishidan skanerlash tugashigacha raqam beradi; keyin navbat ro‘yxat
+          Bot tadbir boshlanishidan skanerlash tugashigacha kod beradi; keyin navbat ro‘yxat
           vaqti bo‘yicha ishlaydi. Yangi tadbir — yuqoridagi tugma orqali.
         </span>
       </div>

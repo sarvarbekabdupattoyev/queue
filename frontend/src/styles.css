@@ -650,8 +650,12 @@ a.btn:hover { text-decoration: none; }
 .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.4vh; flex: 1; min-height: 0; align-content: start; }
 .tiles.one { grid-template-columns: 1fr; }
 .tile { background: var(--dsp-panel2); border-radius: 2vh; padding: 2.2vh 2vw; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1vw; border: 2px solid transparent; }
-.tile .n { font: 400 clamp(44px, 11.5vh, 160px)/0.95 var(--display); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-.tiles.one .tile .n { font-size: clamp(64px, 18vh, 250px); }
+.tile .who { min-width: 0; }
+/* letter codes run wider than the old digits — sized so 4 uppercase serif
+   letters never collide with the desk block */
+.tile .n { font: 400 clamp(36px, 8.6vh, 120px)/0.95 var(--display); letter-spacing: 0.04em; }
+.tile .nm { margin-top: 0.6vh; font: 500 clamp(12px, 2.2vh, 30px)/1.2 var(--body); color: var(--dsp-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tiles.one .tile .n { font-size: clamp(56px, 15vh, 210px); }
 .tile .desk { text-align: right; }
 .tile .desk b { display: block; font: 400 clamp(20px, 4.6vh, 64px)/1 var(--display); color: var(--dsp-amber); white-space: nowrap; }
 .tiles.one .tile .desk b { font-size: clamp(26px, 7vh, 96px); }
@@ -672,9 +676,15 @@ a.btn:hover { text-decoration: none; }
 
 .display-right { display: grid; grid-template-rows: 1fr auto; gap: 1.6vh; min-height: 0; }
 .next-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1vh 1.4vw; align-content: start; }
-.next-list .q { background: var(--dsp-panel2); border-radius: 1.6vh; padding: 1.4vh 1vw; font: 400 clamp(26px, 5.6vh, 80px)/1 var(--display); font-variant-numeric: tabular-nums; text-align: center; }
+/* each waiting entry: the 4-letter code, then (smaller) the client's name
+   and the exact bot registration time — the millisecond order on display */
+.next-list .q { background: var(--dsp-panel2); border-radius: 1.6vh; padding: 1.1vh 1vw; text-align: center; display: grid; gap: 0.35vh; min-width: 0; }
+.next-list .q b { font: 400 clamp(22px, 4.4vh, 60px)/1 var(--display); letter-spacing: 0.06em; }
+.next-list .q .q-name { font: 500 clamp(11px, 1.7vh, 22px)/1.2 var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-list .q .q-time { font: 500 clamp(10px, 1.4vh, 18px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; }
 .next-list .q:first-child { background: rgba(167, 200, 226, 0.14); outline: 2px solid var(--dsp-accent); }
-.next-list .q.late { background: rgba(232, 211, 168, 0.1); color: var(--dsp-amber); font-size: clamp(22px, 4.6vh, 64px); }
+.next-list .q.late { background: rgba(232, 211, 168, 0.1); }
+.next-list .q.late b { color: var(--dsp-amber); }
 .display-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1vw; }
 .display-stats .stat { background: var(--dsp-panel2); }
 .display-stats .stat b { font-size: clamp(22px, 4vh, 56px); color: var(--dsp-text); }

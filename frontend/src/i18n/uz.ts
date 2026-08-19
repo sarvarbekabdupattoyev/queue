@@ -13,7 +13,7 @@ export const uz = {
     title1: 'Sotuv kunlari uchun',
     titleAccent: 'adolatli navbat',
     title2: 'tizimi',
-    sub: 'Mijozlar Telegram-botda ro‘yxatdan o‘tib, tasodifiy 4 xonali raqam va QR-kod oladi. Sotuv kuni QR skanerlanadi, belgilangan vaqtdan so‘ng navbat — faqat kelganlar orasida, botdagi ro‘yxat vaqti bo‘yicha boshlanadi.',
+    sub: 'Mijozlar Telegram-botda ro‘yxatdan o‘tib, tasodifiy 4 harfli kod va QR-kod oladi. Sotuv kuni QR skanerlanadi, belgilangan vaqtdan so‘ng navbat — faqat kelganlar orasida, botdagi ro‘yxat vaqti bo‘yicha boshlanadi.',
     ctaPrimary: 'Bepul boshlash',
     ctaSecondary: 'Qanday ishlaydi?',
     note: 'Mijozlarga ilova kerak emas — faqat Telegram',
@@ -23,7 +23,7 @@ export const uz = {
     calling: 'Hozir chaqirilmoqda',
     desk: '{n}-stol',
     next: 'Keyingi navbat',
-    ticket: 'Sizning raqamingiz',
+    ticket: 'Sizning kodingiz',
     scanUntil: 'Skanerlash 10:00 gacha',
     botChip: 'Telegram-bot',
   },
@@ -37,11 +37,11 @@ export const uz = {
     steps: [
       {
         title: 'Botda ro‘yxat',
-        text: 'Mijoz kompaniyangiz Telegram-botiga /start yozadi: ism, familiya, telefon. Bot unga tasodifiy 4 xonali raqam va QR-kod beradi — tartib bilan emas, taxmin qilib bo‘lmaydi.',
+        text: 'Mijoz kompaniyangiz Telegram-botiga /start yozadi: ism, familiya, telefon. Bot unga tasodifiy 4 harfli kod va QR-kod beradi — tartib bilan emas, taxmin qilib bo‘lmaydi.',
       },
       {
         title: 'Sotuv kuni — QR skaner',
-        text: 'Mijoz ofisga kelib QR-kodini qabulxonada skanerlatadi (USB skaner, kamera yoki raqamni qo‘lda kiritish). Siz belgilagan muddatgacha skanerlash davom etadi.',
+        text: 'Mijoz ofisga kelib QR-kodini qabulxonada skanerlatadi (USB skaner, kamera yoki kodni qo‘lda kiritish). Siz belgilagan muddatgacha skanerlash davom etadi.',
       },
       {
         title: 'Vaqt tugadi — navbat boshlanadi',
@@ -49,7 +49,7 @@ export const uz = {
       },
       {
         title: 'Chaqiruv va xizmat',
-        text: 'Menejerlar o‘z stolidan «Keyingini chaqirish»ni bosadi. Raqam katta ekranda chiqadi, mijozga Telegramdan xabar boradi. Kelmaganlar bir marta kun oxiriga o‘tadi, ikkinchisida bekor bo‘ladi.',
+        text: 'Menejerlar o‘z stolidan «Keyingini chaqirish»ni bosadi. Kod katta ekranda chiqadi, mijozga Telegramdan xabar boradi. Kelmaganlar bir marta kun oxiriga o‘tadi, ikkinchisida bekor bo‘ladi.',
       },
     ],
   },
@@ -72,11 +72,11 @@ export const uz = {
       },
       {
         title: 'QR skaner — 3 usul',
-        text: 'USB skaner (klaviatura kabi), telefon/noutbuk kamerasi yoki 4 xonali raqamni qo‘lda kiritish. Natija rangli va aniq: qabul, kun oxiri yoki xato.',
+        text: 'USB skaner (klaviatura kabi), telefon/noutbuk kamerasi yoki 4 harfli kodni qo‘lda kiritish. Natija rangli va aniq: qabul, kun oxiri yoki xato.',
       },
       {
         title: 'Katta ekran (TV tablo)',
-        text: 'Chaqirilgan raqamlar, stollar, taymer va keyingi navbat — jonli. Havolani televizordagi brauzerga ochasiz, xolos. Ovozli signal ham bor.',
+        text: 'Chaqirilgan kodlar, mijoz ismlari, stollar, taymer va botdagi ro‘yxat vaqtlari bilan keyingi navbat — jonli. Havolani televizordagi brauzerga ochasiz, xolos. Ovozli signal ham bor.',
       },
       {
         title: 'Menejer paneli',
@@ -95,7 +95,7 @@ export const uz = {
   stats: [
     { value: 2000, prefix: '', suffix: '+', label: 'ro‘yxat — bir necha daqiqada' },
     { value: 1, prefix: '<', suffix: ' s', label: 'ekranlardagi yangilanish' },
-    { value: 9000, prefix: '', suffix: '', label: 'raqam sig‘imi har tadbirga' },
+    { value: 456976, prefix: '', suffix: '', label: 'kod sig‘imi har tadbirga' },
     { value: 3, prefix: '', suffix: '', label: 'rol: egasi, menejer, skaner' },
   ],
   launch: {
@@ -117,8 +117,8 @@ export const uz = {
         a: 'Yo‘q. Ro‘yxat, QR-kod va barcha xabarlar Telegramda. Ofisda esa QR qabulxonada skanerlanadi — mijoz telefonida hech narsa o‘rnatmaydi.',
       },
       {
-        q: 'Nega raqamlar tartib bilan emas?',
-        a: 'Tasodifiy 4 xonali raqam navbatdagi o‘rinni oldindan bildirmaydi va “raqam savdosi”ning oldini oladi. Yakuniy tartibni faqat botdagi ro‘yxat vaqti belgilaydi.',
+        q: 'Nega kodlar tartib bilan emas?',
+        a: 'Tasodifiy 4 harfli kod navbatdagi o‘rinni oldindan bildirmaydi va “kod savdosi”ning oldini oladi. Yakuniy tartibni faqat botdagi ro‘yxat vaqti belgilaydi.',
       },
       {
         q: 'Mijoz kech qolsa nima bo‘ladi?',

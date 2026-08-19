@@ -59,7 +59,7 @@ export default function EventDetailPage() {
     onError: (e: Error) => toast(e.message, true),
   })
   const cancelTicket = useMutation({
-    mutationFn: (number: number) => api(`/queue/${eventId}/cancel`, { body: { number } }),
+    mutationFn: (number: string) => api(`/queue/${eventId}/cancel`, { body: { number } }),
     onSuccess: () => {
       toast('Navbat bekor qilindi')
       queryClient.invalidateQueries({ queryKey: ['tickets', eventId] })
@@ -67,7 +67,7 @@ export default function EventDetailPage() {
     onError: (e: Error) => toast(e.message, true),
   })
   const checkin = useMutation({
-    mutationFn: (number: number) => api(`/queue/${eventId}/checkin`, { body: { number } }),
+    mutationFn: (number: string) => api(`/queue/${eventId}/checkin`, { body: { number } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tickets', eventId] }),
     onError: (e: Error) => toast(e.message, true),
   })
@@ -207,7 +207,7 @@ export default function EventDetailPage() {
           <input
             className="input"
             style={{ maxWidth: 260 }}
-            placeholder="Qidirish: ism, telefon, raqam"
+            placeholder="Qidirish: ism, telefon, kod"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

@@ -11,7 +11,9 @@ router = APIRouter(prefix="/public", tags=["public"])
 
 @router.get("/display/{display_code}")
 async def display_state(display_code: str, db: DbSession) -> dict:
-    """State for the office TV board — numbers only, no personal data."""
+    """State for the office TV board: 4-letter codes plus, per product
+    decision, each waiting client's name and bot registration time — never
+    phones, chat ids or ticket QR codes."""
     event = await db.scalar(select(SaleEvent).where(SaleEvent.display_code == display_code))
     if event is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ekran topilmadi")

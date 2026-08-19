@@ -1,9 +1,9 @@
 # SmartNavbat — CLAUDE.md
 
 SmartNavbat (smartnavbat.uz) is a multi-tenant queue-management SaaS for sale
-days: clients register via a company's Telegram bot and get a random 4-digit
-number + QR; on the sale day they check in until a deadline; then the queue
-runs ordered by **bot registration time among checked-in tickets only**.
+days: clients register via a company's Telegram bot and get a random 4-letter
+uppercase code + QR; on the sale day they check in until a deadline; then the
+queue runs ordered by **bot registration time among checked-in tickets only**.
 
 ## MANDATORY git workflow — `dev` is where you work, `main` is production
 
@@ -74,8 +74,9 @@ git checkout dev  && git push origin dev
 
 - Queue order = `registered_at` (bot registration time) among CHECKED_IN
   tickets; late check-ins / skip-returns go to the end-of-day group
-  (`queue_order = LATE_ORDER_BASE + event.late_seq`). Numbers are random
-  4-digit, unique per event — never sequential, never reused.
+  (`queue_order = LATE_ORDER_BASE + event.late_seq`). Ticket "numbers" are
+  random 4-letter uppercase codes, unique per event — never sequential,
+  never reused.
 - Calling is blocked until `event.checkin_until` passes.
 - A second no-show cancels the ticket; the first sends it to end-of-day once.
 - Tenancy: every staff query is scoped by `company_id`; cross-tenant access

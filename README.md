@@ -1,11 +1,11 @@
 # SmartNavbat — smartnavbat.uz
 
 Multi-tenant online queue platform for sale days ("sotuv kuni"): clients register through a
-company's **Telegram bot** and receive a **random 4-digit number + QR code**; on the sale day they
-check in at the reception (QR scan or manual number entry) until a deadline set by the company;
-when the deadline passes the queue starts — ordered by **bot registration time**, counting **only
-checked-in tickets**. Managers call clients to their desks, a TV board shows live numbers, and the
-bot notifies clients at every step.
+company's **Telegram bot** and receive a **random 4-letter uppercase code + QR code**; on the sale
+day they check in at the reception (QR scan or manual code entry) until a deadline set by the
+company; when the deadline passes the queue starts — ordered by **bot registration time**, counting
+**only checked-in tickets**. Managers call clients to their desks, a TV board shows the live queue
+(letter code, client name, bot registration time), and the bot notifies clients at every step.
 
 Built with **FastAPI** (Python) + **React** (TypeScript). UI and bot speak Uzbek.
 
@@ -20,10 +20,10 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 1. The owner creates a **sale event** with two times: `starts_at` (sale day begins) and
    `checkin_until` (QR scanning deadline — **the client company sets this**).
 2. The Telegram bot registers clients any time before `checkin_until` and hands out **random,
-   non-sequential 4-digit numbers** (1000–9999, unique per event).
-3. Until `checkin_until`, reception scans QR codes (or types the number). Calling is blocked.
+   non-sequential 4-letter uppercase codes** (AAAA–ZZZZ, unique per event).
+3. Until `checkin_until`, reception scans QR codes (or types the code). Calling is blocked.
 4. At `checkin_until` the queue starts. Order = **registration time in the bot**, among
-   **scanned tickets only**. The number itself and the arrival order don't matter.
+   **scanned tickets only**. The code itself and the arrival order don't matter.
 5. Late arrivals (scanned after the deadline) and skipped clients who return join the
    **end-of-day group** (once; a second no-show cancels the ticket).
 
@@ -197,7 +197,7 @@ Follow the order — the dashboard checklist walks through the same steps:
 | CRUD | `/api/desks` | owner (read: staff) | manager desks, per-branch |
 | CRUD | `/api/events` (+ `/state`, `/tickets`, `/seed`) | owner (read: staff) | sale events (`branch_ids` multiselect) |
 | GET | `/api/stats/overview?days=N` | owner | dashboard chart aggregates |
-| POST | `/api/queue/{event}/checkin` | staff | QR code or 4-digit number |
+| POST | `/api/queue/{event}/checkin` | staff | QR code or 4-letter code |
 | POST | `/api/queue/{event}/call` · `recall` · `serving` · `skip` · `done` · `cancel` | manager/owner | desk actions |
 | GET | `/api/public/display/{code}` · `/api/public/tickets/{code}` | public | TV board, client ticket |
 | WS | `/api/ws/display/{code}` · `/api/ws/staff/{event}?token=` | public / staff | live state push |

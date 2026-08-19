@@ -12,7 +12,7 @@ interface ScanRecord {
   at: number
   kind: CheckinResponse['kind'] | 'error'
   message: string
-  number?: number
+  number?: string
   name?: string
   branchId?: number | null
 }
@@ -57,7 +57,8 @@ export default function ScannerPage() {
       if (!value || !eventId || busyRef.current) return
       busyRef.current = true
       try {
-        const body = /^\d{4}$/.test(value) ? { number: Number(value) } : { code: value }
+        // a bare 4-letter code is the queue number; anything longer is a QR code
+        const body = /^[A-Za-z]{4}$/.test(value) ? { number: value.toUpperCase() } : { code: value }
         const result = await api<CheckinResponse>(`/queue/${eventId}/checkin`, { body })
         const record: ScanRecord = {
           at: Date.now(),
@@ -159,7 +160,7 @@ export default function ScannerPage() {
   return (
     <StaffShell
       title="QR skaner"
-      subtitle="Qabulxona: mijoz QR ko‘rsatadi yoki raqamini aytadi"
+      subtitle="Qabulxona: mijoz QR ko‘rsatadi yoki kodini aytadi"
       eventId={eventId}
       onEventChange={selectEvent}
     >
@@ -199,7 +200,7 @@ export default function ScannerPage() {
                   style={{ fontSize: 20, padding: '14px 16px' }}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="QR kod (USB skaner) yoki 4 xonali raqam"
+                  placeholder="QR kod (USB skaner) yoki 4 harfli kod"
                   autoFocus
                   disabled={!checkinOpen}
                 />

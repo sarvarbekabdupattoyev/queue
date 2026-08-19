@@ -22,8 +22,10 @@ requirements, not suggestions.
 - Every read/write of company-owned data filters by the caller's
   `company_id`. Existence of foreign resources must not leak: return 404,
   same body/timing as truly missing.
-- Public surfaces expose the minimum: display state = numbers only;
-  ticket page keyed by unguessable code (never sequential ids in URLs).
+- Public surfaces expose the minimum: display state = letter codes plus, by
+  product decision, waiting clients' names and bot registration times — never
+  phones, chat ids or ticket QR codes; ticket page keyed by unguessable code
+  (never sequential ids in URLs).
 
 ## Input handling
 

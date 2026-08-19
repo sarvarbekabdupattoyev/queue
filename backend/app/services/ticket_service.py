@@ -1,4 +1,5 @@
 import secrets
+import string
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -7,32 +8,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import SaleEvent, Ticket, TicketSource
 from app.services.errors import ConflictError, DomainError
 
-MIN_NUMBER = 1000
-MAX_NUMBER = 9999
-CAPACITY = MAX_NUMBER - MIN_NUMBER + 1
+NUMBER_ALPHABET = string.ascii_uppercase
+NUMBER_LENGTH = 4
+CAPACITY = len(NUMBER_ALPHABET) ** NUMBER_LENGTH  # 456 976 codes per event
+_PICK_ATTEMPTS = 60
 
 
-def make_code(number: int) -> str:
+def make_code(number: str) -> str:
     return f"NVB-{number}-{secrets.token_hex(3).upper()}"
 
 
-async def _pick_free_number(db: AsyncSession, event_id: int) -> int:
-    """Random, non-sequential 4-digit number, unique within the event."""
-    for _ in range(40):
-        candidate = MIN_NUMBER + secrets.randbelow(CAPACITY)
+def random_number() -> str:
+    return "".join(secrets.choice(NUMBER_ALPHABET) for _ in range(NUMBER_LENGTH))
+
+
+async def _pick_free_number(db: AsyncSession, event_id: int) -> str:
+    """Random, non-sequential 4-letter code (A–Z), unique within the event."""
+    for _ in range(_PICK_ATTEMPTS):
+        candidate = random_number()
         taken = await db.scalar(
             select(Ticket.id).where(Ticket.event_id == event_id, Ticket.number == candidate)
         )
         if taken is None:
             return candidate
-    # dense event: fall back to choosing uniformly among the remaining numbers
-    used = set(
-        (await db.scalars(select(Ticket.number).where(Ticket.event_id == event_id))).all()
-    )
-    free = [n for n in range(MIN_NUMBER, MAX_NUMBER + 1) if n not in used]
-    if not free:
-        raise DomainError("Tadbirda bo'sh raqam qolmadi (9000 ta chegara)")
-    return secrets.choice(free)
+    # 60 straight collisions means the event is essentially at the 456 976-code
+    # capacity (odds are astronomically small below ~90% fill) — treat as full
+    # instead of scanning the whole space.
+    raise DomainError("Tadbirda bo'sh kod qolmadi")
 
 
 async def get_ticket_by_phone(db: AsyncSession, event_id: int, phone: str) -> Ticket | None:

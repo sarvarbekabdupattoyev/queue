@@ -1,6 +1,7 @@
-"""Core product rules: random 4-digit numbers, the check-in window, and queue
+"""Core product rules: random 4-letter codes, the check-in window, and queue
 order by bot registration time among checked-in tickets only."""
 
+import re
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -67,14 +68,14 @@ async def close_checkin_window(client, token, event_id):
     assert response.status_code == 200, response.text
 
 
-async def test_numbers_are_random_unique_four_digit(client):
+async def test_numbers_are_random_unique_four_letter(client):
     token, _ = await setup_company(client, desks=0)
     event = await create_event(client, token)
     numbers = []
     for i in range(60):
         ticket = await make_ticket(event["id"], f"+9989012345{i:02d}", i)
         numbers.append(ticket["number"])
-    assert all(1000 <= n <= 9999 for n in numbers)
+    assert all(re.fullmatch(r"[A-Z]{4}", n) for n in numbers)
     assert len(set(numbers)) == len(numbers)
     # not handed out in order
     assert numbers != sorted(numbers)
@@ -245,8 +246,15 @@ async def test_public_display_and_ticket_endpoints(client):
     display = await client.get(f"/api/public/display/{event['display_code']}")
     assert display.status_code == 200
     body = display.json()
-    assert body["next"] == [ticket["number"]]
-    assert "waiting_list" not in body  # no personal data on the public board
+    # the board shows the letter code, the client's name and the bot
+    # registration moment with milliseconds — but never phones or QR codes
+    (entry,) = body["next"]
+    assert entry["number"] == ticket["number"]
+    assert entry["name"] == "Mijoz 0001"
+    assert re.search(r"\d{2}:\d{2}:\d{2}\.\d{3}", entry["registered_at"])
+    assert entry["late"] is False
+    assert "phone" not in entry and "code" not in entry
+    assert "waiting_list" not in body  # staff-only payload stays staff-only
     assert body["stats"]["waiting"] == 1
 
     public_ticket = await client.get(f"/api/public/tickets/{ticket['code']}")
@@ -300,6 +308,6 @@ async def test_events_isolated_between_companies(client):
     peek = await client.get(f"/api/events/{event1['id']}", headers=auth(token2))
     assert peek.status_code == 404
     poke = await client.post(
-        f"/api/queue/{event1['id']}/checkin", json={"number": 1234}, headers=auth(token2)
+        f"/api/queue/{event1['id']}/checkin", json={"number": "ABCD"}, headers=auth(token2)
     )
     assert poke.status_code == 404

@@ -4,7 +4,7 @@
 event if several are open) → (choose branch if the event runs in several) →
 F.I.Sh. in one line → phone via the contact button ONLY (typed numbers are
 rejected; one phone = one ticket, duplicates get their existing ticket back)
-→ ticket with a random 4-digit number + QR photo.
+→ ticket with a random 4-letter uppercase code + QR photo.
 
 The persistent menu always carries the company-info button (name, logo,
 locations, upcoming sale dates, contact phones) and a language switcher.

@@ -59,7 +59,7 @@ export default function TicketPage() {
           )}
         </div>
         <div className="number">№{data.number}</div>
-        <div className="muted">{data.first_name}, sizning navbat raqamingiz</div>
+        <div className="muted">{data.first_name}, sizning navbat kodingiz</div>
         <img className="qr" src={data.qr} alt={`№${data.number} QR kodi`} />
         <p style={{ fontWeight: 600 }}>{STATUS_TEXT[data.status]}</p>
         {data.status === 'checked_in' && data.position !== null && (

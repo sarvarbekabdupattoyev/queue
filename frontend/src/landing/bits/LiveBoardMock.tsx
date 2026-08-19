@@ -4,14 +4,14 @@ import { Logo } from '../../components/icons'
 import { useLang } from '../../i18n'
 
 const CALLS = [
-  { number: 4821, desk: 3 },
-  { number: 1544, desk: 1 },
-  { number: 9067, desk: 2 },
+  { number: 'KRTA', desk: 3 },
+  { number: 'DFHM', desk: 1 },
+  { number: 'PXLE', desk: 2 },
 ]
-const NEXT = [7203, 2918, 6350, 8412]
+const NEXT = ['WZQN', 'BJSU', 'MVGO', 'QYCD']
 
 /** Hero product mock: a live TV board, a client ticket and a bot chip,
- * gently floating; the called number cycles. */
+ * gently floating; the called code cycles. */
 export function LiveBoardMock() {
   const { t } = useLang()
   const reduced = useReducedMotion()
@@ -70,7 +70,7 @@ export function LiveBoardMock() {
 
       <motion.div className="ticket-mock" {...float(1.2, 9)}>
         <div className="ticket-mock-label">{t.board.ticket}</div>
-        <div className="ticket-mock-number mono">№4821</div>
+        <div className="ticket-mock-number mono">№KRTA</div>
         <div className="ticket-mock-qr">
           {QR_CELLS.map((on, i) => (
             <span key={i} className={on ? 'on' : ''} />

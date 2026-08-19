@@ -211,17 +211,17 @@ _T: dict[str, dict[str, str]] = {
     },
     # ------------------------------------------------------------- ticket ---
     "ticket_caption": {
-        "uz": "{intro}🎫 Navbat raqamingiz: №{number}\n🗓 {event} — {starts}\n{branch_line}"
+        "uz": "{intro}🎫 Navbat kodingiz: №{number}\n🗓 {event} — {starts}\n{branch_line}"
               "👤 {name}\n📞 {phone}\n\n"
               "Ofisga kelganda shu QR-kodni qabulxonada ko'rsating — kelganingiz qayd etiladi. "
               "Skanerlash {deadline} gacha. Navbat tartibi ro'yxatdan o'tgan vaqtingiz "
               "bo'yicha belgilanadi.\n\nHolat: {status}",
-        "ru": "{intro}🎫 Ваш номер очереди: №{number}\n🗓 {event} — {starts}\n{branch_line}"
+        "ru": "{intro}🎫 Ваш код очереди: №{number}\n🗓 {event} — {starts}\n{branch_line}"
               "👤 {name}\n📞 {phone}\n\n"
               "Придя в офис, покажите этот QR-код на ресепшене — вашу явку отметят. "
               "Сканирование до {deadline}. Порядок очереди определяется временем "
               "вашей регистрации.\n\nСтатус: {status}",
-        "en": "{intro}🎫 Your queue number: №{number}\n🗓 {event} — {starts}\n{branch_line}"
+        "en": "{intro}🎫 Your queue code: №{number}\n🗓 {event} — {starts}\n{branch_line}"
               "👤 {name}\n📞 {phone}\n\n"
               "When you arrive, show this QR code at the reception desk to check in. "
               "Scanning is open until {deadline}. The queue order is based on your "
@@ -245,35 +245,35 @@ _T: dict[str, dict[str, str]] = {
         "en": "📊 {now_line} Waiting: {waiting} people.\n\n{mine}",
     },
     "your_pos_queue": {
-        "uz": "Sizning raqamingiz: №{number}. Sizdan oldin {ahead} kishi bor.",
-        "ru": "Ваш номер: №{number}. Перед вами {ahead} человек.",
-        "en": "Your number: №{number}. There are {ahead} people ahead of you.",
+        "uz": "Sizning kodingiz: №{number}. Sizdan oldin {ahead} kishi bor.",
+        "ru": "Ваш код: №{number}. Перед вами {ahead} человек.",
+        "en": "Your code: №{number}. There are {ahead} people ahead of you.",
     },
     "your_pos_prequeue": {
-        "uz": "Sizning raqamingiz: №{number}. Navbat {time} da boshlanadi — hozircha "
+        "uz": "Sizning kodingiz: №{number}. Navbat {time} da boshlanadi — hozircha "
               "{position}-o'rindasiz.",
-        "ru": "Ваш номер: №{number}. Очередь начнётся в {time} — сейчас вы на "
+        "ru": "Ваш код: №{number}. Очередь начнётся в {time} — сейчас вы на "
               "{position}-м месте.",
-        "en": "Your number: №{number}. The queue starts at {time} — you are currently "
+        "en": "Your code: №{number}. The queue starts at {time} — you are currently "
               "in position {position}.",
     },
     "your_called": {
-        "uz": "Sizning raqamingiz: №{number} — chaqirilgansiz! {desk}-stolga yaqinlashing.",
-        "ru": "Ваш номер: №{number} — вас вызвали! Подойдите к столу {desk}.",
-        "en": "Your number: №{number} — you have been called! Please go to desk {desk}.",
+        "uz": "Sizning kodingiz: №{number} — chaqirilgansiz! {desk}-stolga yaqinlashing.",
+        "ru": "Ваш код: №{number} — вас вызвали! Подойдите к столу {desk}.",
+        "en": "Your code: №{number} — you have been called! Please go to desk {desk}.",
     },
     "your_registered": {
-        "uz": "Sizning raqamingiz: №{number}. Ofisga kelganda QR-kodni qabulxonada "
+        "uz": "Sizning kodingiz: №{number}. Ofisga kelganda QR-kodni qabulxonada "
               "ko'rsating ({deadline} gacha).",
-        "ru": "Ваш номер: №{number}. Придя в офис, покажите QR-код на ресепшене "
+        "ru": "Ваш код: №{number}. Придя в офис, покажите QR-код на ресепшене "
               "(до {deadline}).",
-        "en": "Your number: №{number}. When you arrive, show your QR code at the "
+        "en": "Your code: №{number}. When you arrive, show your QR code at the "
               "reception desk (until {deadline}).",
     },
     "your_status": {
-        "uz": "Sizning raqamingiz: №{number}. Holat: {status}.",
-        "ru": "Ваш номер: №{number}. Статус: {status}.",
-        "en": "Your number: №{number}. Status: {status}.",
+        "uz": "Sizning kodingiz: №{number}. Holat: {status}.",
+        "ru": "Ваш код: №{number}. Статус: {status}.",
+        "en": "Your code: №{number}. Status: {status}.",
     },
     # ---------------------------------------------------------- company info ---
     "info_events_header": {

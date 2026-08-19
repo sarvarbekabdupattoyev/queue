@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { wsUrl } from '../api/client'
 import { IconExpand, IconSound } from '../components/icons'
 import type { PublicState } from '../api/types'
-import { UZ_DAYS, UZ_MONTHS, formatCountdown, formatLongCountdown } from '../lib/format'
+import { UZ_DAYS, UZ_MONTHS, formatCountdown, formatLongCountdown, formatTimeMs } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 
 async function fetchState(displayCode: string): Promise<PublicState> {
@@ -132,7 +132,6 @@ export default function DisplayPage() {
     .slice(0, 6)
   const next = branchSection ? branchSection.next : state.next
   const stats = branchSection ? branchSection.stats : state.stats
-  const lateSet = new Set(branchSection ? branchSection.late_numbers : state.late_numbers)
 
   if (branchMissing) {
     return (
@@ -188,7 +187,7 @@ export default function DisplayPage() {
             <div className="display-empty">
               Hozircha chaqiruv yo‘q.
               <br />
-              Raqamingiz chiqishini kuting.
+              Kodingiz chiqishini kuting.
             </div>
           ) : (
             <div className={`tiles${called.length === 1 ? ' one' : ''}`}>
@@ -203,7 +202,10 @@ export default function DisplayPage() {
                     key={key}
                     className={`tile${call.status === 'serving' ? ' serving' : ''}${freshKeys.has(key) ? ' fresh' : ''}${expired ? ' expired' : ''}`}
                   >
-                    <div className="n">{call.number}</div>
+                    <div className="who">
+                      <div className="n">{call.number}</div>
+                      <div className="nm">{call.name}</div>
+                    </div>
                     <div className="desk">
                       <b>{call.desk_number}-stol</b>
                       {branchSection === null && call.branch_id !== null && (
@@ -235,9 +237,11 @@ export default function DisplayPage() {
               </div>
             ) : (
               <div className="next-list">
-                {next.slice(0, 10).map((n) => (
-                  <div key={n} className={`q${lateSet.has(n) ? ' late' : ''}`}>
-                    {n}
+                {next.slice(0, 8).map((entry) => (
+                  <div key={entry.number} className={`q${entry.late ? ' late' : ''}`}>
+                    <b>{entry.number}</b>
+                    <span className="q-name">{entry.name}</span>
+                    <span className="q-time">{formatTimeMs(entry.registered_at)}</span>
                   </div>
                 ))}
               </div>

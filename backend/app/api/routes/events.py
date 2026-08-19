@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import CompanyEvent, DbSession, OwnCompany, require_roles
 from app.models import (
@@ -216,7 +216,7 @@ async def list_tickets(
                 Ticket.first_name.ilike(needle),
                 Ticket.last_name.ilike(needle),
                 Ticket.phone.ilike(needle),
-                cast(Ticket.number, String).ilike(needle),
+                Ticket.number.ilike(needle),
             )
         )
     if ticket_status is not None:

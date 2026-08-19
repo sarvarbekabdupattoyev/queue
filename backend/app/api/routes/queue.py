@@ -42,7 +42,7 @@ def _assert_same_branch(ticket: Ticket, user: User) -> None:
 async def check_in(
     payload: CheckinRequest, db: DbSession, event: CompanyEvent, user: StaffUser
 ) -> dict:
-    """QR scanned (code) or 4-digit number entered manually at the reception."""
+    """QR scanned (code) or 4-letter code entered manually at the reception."""
     ticket = None
     if payload.code:
         code = payload.code.strip()
@@ -108,8 +108,8 @@ async def call_next(
     }
 
 
-async def _load_ticket(db: DbSession, event, number: int, user: User) -> Ticket:
-    """Resolve a ticket by its number inside the event, refusing tickets that
+async def _load_ticket(db: DbSession, event, number: str, user: User) -> Ticket:
+    """Resolve a ticket by its code inside the event, refusing tickets that
     belong to another branch than the acting staff member."""
     try:
         ticket = await queue_service.get_ticket_by_number(db, event.id, number)

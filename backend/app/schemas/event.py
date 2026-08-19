@@ -1,8 +1,19 @@
+import re
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import EventPhase, TicketSource, TicketStatus
+
+# the queue "number" is a random 4-letter uppercase code (see ticket_service)
+NUMBER_RE = re.compile(r"^[A-Z]{4}$")
+
+
+def normalize_ticket_number(value: str) -> str:
+    number = value.strip().upper()
+    if not NUMBER_RE.fullmatch(number):
+        raise ValueError("Navbat kodi 4 ta lotin harfidan iborat bo'ladi")
+    return number
 
 
 class EventBranchOut(BaseModel):
@@ -58,7 +69,7 @@ class TicketOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    number: int
+    number: str
     code: str
     first_name: str
     last_name: str
@@ -78,13 +89,18 @@ class TicketOut(BaseModel):
 
 
 class CheckinRequest(BaseModel):
-    code: str | None = None
-    number: int | None = None
+    code: str | None = Field(default=None, max_length=64)
+    number: str | None = Field(default=None, max_length=16)
+
+    @field_validator("number")
+    @classmethod
+    def _normalize_number(cls, v: str | None) -> str | None:
+        return None if v is None else normalize_ticket_number(v)
 
     @model_validator(mode="after")
     def _one_of(self) -> "CheckinRequest":
         if not self.code and self.number is None:
-            raise ValueError("QR kod yoki navbat raqami kerak")
+            raise ValueError("QR kod yoki navbat kodi kerak")
         return self
 
 
@@ -93,7 +109,12 @@ class CallNextRequest(BaseModel):
 
 
 class TicketActionRequest(BaseModel):
-    number: int
+    number: str = Field(max_length=16)
+
+    @field_validator("number")
+    @classmethod
+    def _normalize_number(cls, v: str) -> str:
+        return normalize_ticket_number(v)
 
 
 class SeedRequest(BaseModel):

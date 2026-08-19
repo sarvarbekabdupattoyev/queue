@@ -15,7 +15,7 @@ export const en: Dict = {
     title1: 'The fair queue system',
     titleAccent: 'for sale days',
     title2: '',
-    sub: 'Clients register in your Telegram bot and get a random 4-digit number with a QR code. On the sale day the QR is scanned; when the deadline passes, the queue starts — only among those who checked in, ordered by bot registration time.',
+    sub: 'Clients register in your Telegram bot and get a random 4-letter code with a QR code. On the sale day the QR is scanned; when the deadline passes, the queue starts — only among those who checked in, ordered by bot registration time.',
     ctaPrimary: 'Start for free',
     ctaSecondary: 'How does it work?',
     note: 'No app for clients — just Telegram',
@@ -25,7 +25,7 @@ export const en: Dict = {
     calling: 'Now calling',
     desk: 'Desk {n}',
     next: 'Up next',
-    ticket: 'Your number',
+    ticket: 'Your code',
     scanUntil: 'Scanning until 10:00',
     botChip: 'Telegram bot',
   },
@@ -39,11 +39,11 @@ export const en: Dict = {
     steps: [
       {
         title: 'Register in the bot',
-        text: 'A client sends /start to your company bot: name, surname, phone. The bot replies with a random 4-digit number and a QR code — never sequential, impossible to guess.',
+        text: 'A client sends /start to your company bot: name, surname, phone. The bot replies with a random 4-letter code and a QR code — never sequential, impossible to guess.',
       },
       {
         title: 'Sale day — QR check-in',
-        text: 'At the office the client shows the QR at reception (USB scanner, camera, or typing the number). Check-in stays open until the deadline you set.',
+        text: 'At the office the client shows the QR at reception (USB scanner, camera, or typing the code). Check-in stays open until the deadline you set.',
       },
       {
         title: 'Deadline — the queue forms',
@@ -51,7 +51,7 @@ export const en: Dict = {
       },
       {
         title: 'Calling and serving',
-        text: 'Managers press “Call next” at their desks. The number appears on the big screen and the client gets a Telegram message. A no-show moves to the end of the day once; a second no-show cancels the ticket.',
+        text: 'Managers press “Call next” at their desks. The code appears on the big screen and the client gets a Telegram message. A no-show moves to the end of the day once; a second no-show cancels the ticket.',
       },
     ],
   },
@@ -74,11 +74,11 @@ export const en: Dict = {
       },
       {
         title: 'QR check-in — 3 ways',
-        text: 'USB scanner (works like a keyboard), phone/laptop camera, or typing the 4-digit number. Clear color-coded results: accepted, end-of-day, or error.',
+        text: 'USB scanner (works like a keyboard), phone/laptop camera, or typing the 4-letter code. Clear color-coded results: accepted, end-of-day, or error.',
       },
       {
         title: 'Big screen (TV board)',
-        text: 'Called numbers, desks, countdowns and the next-up list — live. Just open the link in the TV browser. With an optional chime.',
+        text: 'Called codes with client names, desks, countdowns and the next-up list with bot registration times — live. Just open the link in the TV browser. With an optional chime.',
       },
       {
         title: 'Manager panel',
@@ -97,7 +97,7 @@ export const en: Dict = {
   stats: [
     { value: 2000, prefix: '', suffix: '+', label: 'registrations in minutes' },
     { value: 1, prefix: '<', suffix: ' s', label: 'screen update latency' },
-    { value: 9000, prefix: '', suffix: '', label: 'numbers per event' },
+    { value: 456976, prefix: '', suffix: '', label: 'codes per event' },
     { value: 3, prefix: '', suffix: '', label: 'roles: owner, manager, scanner' },
   ],
   launch: {
@@ -119,8 +119,8 @@ export const en: Dict = {
         a: 'No. Registration, the QR code and every notification live in Telegram. At the office the QR is scanned at reception — nothing is installed on the client’s phone.',
       },
       {
-        q: 'Why are the numbers not sequential?',
-        a: 'A random 4-digit number reveals nothing about the position and prevents “number trading”. The final order is decided only by bot registration time.',
+        q: 'Why are the codes not sequential?',
+        a: 'A random 4-letter code reveals nothing about the position and prevents “code trading”. The final order is decided only by bot registration time.',
       },
       {
         q: 'What if a client is late?',
