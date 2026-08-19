@@ -251,6 +251,91 @@ async def test_branch_staff_cannot_cross_branches(client):
     assert call.status_code == 403
 
 
+async def test_branch_manager_cannot_act_on_another_branch_ticket(client):
+    """Calling is branch-scoped; so are the per-ticket actions that follow it."""
+    token = (await register_owner(client))["access_token"]
+    await create_company(client, token)
+    branch_a = await make_branch(client, token, "Chilonzor")
+    branch_b = await make_branch(client, token, "Sergeli")
+    event = await make_event(client, token, [branch_a["id"], branch_b["id"]])
+    desk_b = await client.post(
+        "/api/desks", json={"number": 1, "branch_id": branch_b["id"]}, headers=auth(token)
+    )
+    manager_a = await client.post(
+        "/api/employees",
+        json={
+            "first_name": "Menejer", "phone": "+998904444444",
+            "role": "manager", "branch_id": branch_a["id"],
+        },
+        headers=auth(token),
+    )
+    login = await client.post(
+        "/api/auth/login",
+        json={"phone": "+998904444444", "password": manager_a.json()["password"]},
+    )
+    manager_token = login.json()["access_token"]
+
+    ticket_b = await make_ticket(event["id"], "+998901000021", -60, branch_b["id"])
+    await client.post(
+        f"/api/queue/{event['id']}/checkin",
+        json={"number": ticket_b["number"]},
+        headers=auth(token),
+    )
+    await close_checkin(client, token, event["id"])
+    called = await client.post(
+        f"/api/queue/{event['id']}/call",
+        json={"desk_id": desk_b.json()["id"]},
+        headers=auth(token),
+    )
+    assert called.json()["ticket"]["number"] == ticket_b["number"]
+
+    # the branch-A manager must not touch a branch-B client at any step
+    for action in ("recall", "serving", "skip", "done"):
+        response = await client.post(
+            f"/api/queue/{event['id']}/{action}",
+            json={"number": ticket_b["number"]},
+            headers=auth(manager_token),
+        )
+        assert response.status_code == 403, f"{action} leaked across branches"
+
+    # the owner (no branch) still can
+    assert (
+        await client.post(
+            f"/api/queue/{event['id']}/serving",
+            json={"number": ticket_b["number"]},
+            headers=auth(token),
+        )
+    ).status_code == 200
+
+
+async def test_cannot_add_branches_to_event_with_unscoped_tickets(client):
+    """Tickets registered before branches exist carry no branch, so no desk
+    could ever call them — adding branches later must be refused."""
+    token = (await register_owner(client))["access_token"]
+    await create_company(client, token)
+    branch = await make_branch(client, token, "Chilonzor")
+    event = await make_event(client, token, [])  # unscoped event
+    await make_ticket(event["id"], "+998901000031", -60, None)
+
+    blocked = await client.patch(
+        f"/api/events/{event['id']}",
+        json={"branch_ids": [branch["id"]]},
+        headers=auth(token),
+    )
+    assert blocked.status_code == 400
+    assert "filialsiz" in blocked.json()["detail"]
+
+    # an event with no tickets yet can still gain branches
+    empty_event = await make_event(client, token, [], name="Bo'sh tadbir")
+    ok = await client.patch(
+        f"/api/events/{empty_event['id']}",
+        json={"branch_ids": [branch["id"]]},
+        headers=auth(token),
+    )
+    assert ok.status_code == 200
+    assert [b["name"] for b in ok.json()["branches"]] == ["Chilonzor"]
+
+
 async def test_event_branch_validation_and_removal_guard(client):
     token = (await register_owner(client))["access_token"]
     await create_company(client, token)

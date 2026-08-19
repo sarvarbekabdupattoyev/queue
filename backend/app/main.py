@@ -107,7 +107,6 @@ def create_app() -> FastAPI:
         branches.router,
         employees.router,
         desks.router,
-        branches.router,
         events.router,
         queue.router,
         stats.router,

@@ -160,6 +160,26 @@ async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent)
                     status.HTTP_400_BAD_REQUEST,
                     "Navbatlari bor filialni tadbirdan chiqarib bo'lmaydi",
                 )
+        # Turning an unscoped event into a branch event would strand the
+        # tickets registered before it: they carry no branch, so no desk —
+        # which always serves one branch — could ever call them.
+        if branches and not event.branches:
+            unscoped = await db.scalar(
+                select(Ticket.id)
+                .where(
+                    Ticket.event_id == event.id,
+                    Ticket.branch_id.is_(None),
+                    Ticket.status != TicketStatus.CANCELLED,
+                )
+                .limit(1)
+            )
+            if unscoped is not None:
+                await db.rollback()
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Bu tadbirda filialsiz navbatlar bor — ularni filialga bog'lab bo'lmaydi. "
+                    "Filiallarni tadbir boshlanishidan oldin belgilang.",
+                )
         event.branches = branches
     await db.commit()
     await db.refresh(event)

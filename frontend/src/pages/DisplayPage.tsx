@@ -123,6 +123,9 @@ export default function DisplayPage() {
   // a branch TV shows only its branch's calls, queue and stats
   const branchSection =
     branchParam !== null ? (state.by_branch.find((b) => b.id === branchParam) ?? null) : null
+  // a pinned branch that this event does not run in must not silently fall
+  // back to announcing every branch on that branch's screen
+  const branchMissing = branchParam !== null && branchSection === null
   const branchNames = new Map(state.event.branches.map((b) => [b.id, b.name]))
   const called = state.called
     .filter((c) => branchSection === null || c.branch_id === branchSection.id)
@@ -130,6 +133,18 @@ export default function DisplayPage() {
   const next = branchSection ? branchSection.next : state.next
   const stats = branchSection ? branchSection.stats : state.stats
   const lateSet = new Set(branchSection ? branchSection.late_numbers : state.late_numbers)
+
+  if (branchMissing) {
+    return (
+      <div className="display-shell" style={{ placeItems: 'center', display: 'grid' }}>
+        <div className="display-empty">
+          Bu ekran uchun tanlangan filial tadbirda ishtirok etmayapti.
+          <br />
+          Boshqaruv panelidan filial ekrani havolasini qayta oling.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="display-shell">

@@ -161,21 +161,22 @@ export default function EventsPage() {
     setEditing('new')
   }
 
-  // the topbar CTA lands here with ?new=1 — open the create dialog once
+  // The topbar CTA lands here with ?new=1. On a cold navigation the setup
+  // queries are still loading, so wait for them before consuming the param —
+  // clearing it first would swallow the request and open nothing.
   useEffect(() => {
-    if (!searchParams.get('new')) return
+    if (!searchParams.get('new') || !setupLoaded) return
     setSearchParams({}, { replace: true })
-    if (!setupLoaded) return
     if (!setupReady) {
       toast('Avval tayyorgarlik qadamlarini bajaring', true)
       return
     }
     setForm({ ...EMPTY_FORM, branch_ids: (branches ?? []).map((b) => b.id) })
     setEditing('new')
-    // branches/setup flags are read once the CTA fires; re-running on their
-    // change would reopen the dialog behind the user
+    // `branches` is read once when the CTA fires; listing it would reopen the
+    // dialog behind the user whenever the branch list refetches
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams, setupLoaded, setupReady])
+  }, [searchParams, setSearchParams, setupLoaded, setupReady, toast])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['events'] })
   const toggleActive = useMutation({

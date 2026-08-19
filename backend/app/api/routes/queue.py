@@ -1,8 +1,10 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import CompanyEvent, DbSession, ManagerUser, StaffUser, require_roles
-from app.models import Branch, Desk, Ticket, UserRole
+from app.models import Branch, Desk, Ticket, User, UserRole
 from app.schemas.event import CallNextRequest, CheckinRequest, TicketActionRequest, TicketOut
 from app.services import queue_service
 from app.services.errors import DomainError
@@ -22,6 +24,18 @@ def _out(ticket: Ticket, desk_number: int | None = None, position: int | None = 
 
 def _raise(exc: DomainError) -> None:
     raise HTTPException(exc.status_code, exc.message) from None
+
+
+def _assert_same_branch(ticket: Ticket, user: User) -> None:
+    """Branch staff only ever act on their own branch's clients."""
+    if (
+        ticket.branch_id is not None
+        and user.branch_id is not None
+        and ticket.branch_id != user.branch_id
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Bu navbat boshqa filialga tegishli"
+        )
 
 
 @router.post("/{event_id}/checkin")
@@ -94,16 +108,22 @@ async def call_next(
     }
 
 
-async def _load_ticket(db: DbSession, event, number: int) -> Ticket:
+async def _load_ticket(db: DbSession, event, number: int, user: User) -> Ticket:
+    """Resolve a ticket by its number inside the event, refusing tickets that
+    belong to another branch than the acting staff member."""
     try:
-        return await queue_service.get_ticket_by_number(db, event.id, number)
+        ticket = await queue_service.get_ticket_by_number(db, event.id, number)
     except DomainError as exc:
         _raise(exc)
+    _assert_same_branch(ticket, user)
+    return ticket
 
 
-@router.post("/{event_id}/recall", dependencies=[ManagerOnly])
-async def recall(payload: TicketActionRequest, db: DbSession, event: CompanyEvent) -> dict:
-    ticket = await _load_ticket(db, event, payload.number)
+@router.post("/{event_id}/recall")
+async def recall(
+    payload: TicketActionRequest, db: DbSession, event: CompanyEvent, user: ManagerUser
+) -> dict:
+    ticket = await _load_ticket(db, event, payload.number, user)
     try:
         await queue_service.recall(db, event, ticket)
     except DomainError as exc:
@@ -111,9 +131,11 @@ async def recall(payload: TicketActionRequest, db: DbSession, event: CompanyEven
     return {"ok": True, "message": "Takroriy chaqiruv yuborildi", "ticket": _out(ticket)}
 
 
-@router.post("/{event_id}/serving", dependencies=[ManagerOnly])
-async def serving(payload: TicketActionRequest, db: DbSession, event: CompanyEvent) -> dict:
-    ticket = await _load_ticket(db, event, payload.number)
+@router.post("/{event_id}/serving")
+async def serving(
+    payload: TicketActionRequest, db: DbSession, event: CompanyEvent, user: ManagerUser
+) -> dict:
+    ticket = await _load_ticket(db, event, payload.number, user)
     try:
         await queue_service.start_serving(db, event, ticket)
     except DomainError as exc:
@@ -121,9 +143,11 @@ async def serving(payload: TicketActionRequest, db: DbSession, event: CompanyEve
     return {"ok": True, "message": f"№{ticket.number} — xizmat boshlandi", "ticket": _out(ticket)}
 
 
-@router.post("/{event_id}/skip", dependencies=[ManagerOnly])
-async def skip(payload: TicketActionRequest, db: DbSession, event: CompanyEvent) -> dict:
-    ticket = await _load_ticket(db, event, payload.number)
+@router.post("/{event_id}/skip")
+async def skip(
+    payload: TicketActionRequest, db: DbSession, event: CompanyEvent, user: ManagerUser
+) -> dict:
+    ticket = await _load_ticket(db, event, payload.number, user)
     try:
         await queue_service.skip(db, event, ticket)
     except DomainError as exc:
@@ -131,9 +155,11 @@ async def skip(payload: TicketActionRequest, db: DbSession, event: CompanyEvent)
     return {"ok": True, "message": f"№{ticket.number} o'tkazib yuborildi", "ticket": _out(ticket)}
 
 
-@router.post("/{event_id}/done", dependencies=[ManagerOnly])
-async def done(payload: TicketActionRequest, db: DbSession, event: CompanyEvent) -> dict:
-    ticket = await _load_ticket(db, event, payload.number)
+@router.post("/{event_id}/done")
+async def done(
+    payload: TicketActionRequest, db: DbSession, event: CompanyEvent, user: ManagerUser
+) -> dict:
+    ticket = await _load_ticket(db, event, payload.number, user)
     try:
         await queue_service.finish(db, event, ticket)
     except DomainError as exc:
@@ -141,9 +167,14 @@ async def done(payload: TicketActionRequest, db: DbSession, event: CompanyEvent)
     return {"ok": True, "message": f"№{ticket.number} yakunlandi", "ticket": _out(ticket)}
 
 
-@router.post("/{event_id}/cancel", dependencies=[Depends(require_roles(UserRole.OWNER))])
-async def cancel(payload: TicketActionRequest, db: DbSession, event: CompanyEvent) -> dict:
-    ticket = await _load_ticket(db, event, payload.number)
+@router.post("/{event_id}/cancel")
+async def cancel(
+    payload: TicketActionRequest,
+    db: DbSession,
+    event: CompanyEvent,
+    user: Annotated[User, Depends(require_roles(UserRole.OWNER))],
+) -> dict:
+    ticket = await _load_ticket(db, event, payload.number, user)
     try:
         await queue_service.cancel(db, event, ticket)
     except DomainError as exc:
