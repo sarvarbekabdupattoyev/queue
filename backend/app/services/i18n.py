@@ -352,8 +352,9 @@ _T: dict[str, dict[str, str]] = {
     },
     # ------------------------------------------------- queue notifications ---
     "ntf_checkin_prequeue": {
-        "uz": "✅ Kelganingiz qayd etildi (№{number}).\n\nSizning tartib raqamingiz: {position}."
-              "\n\nSotuv {time} da boshlanadi.",
+        "uz": "✅ Kelganingiz qayd etildi (№{number}).\nSotuv {time} da boshlanadi. Navbat "
+              "tartibi botdan ro'yxatdan o'tgan vaqt bo'yicha belgilanadi va sotuv "
+              "boshlanganda shu yerda yuboriladi.",
         "ru": "✅ Ваша явка отмечена (№{number}).\nПродажа начнётся в {time}. Порядок — по "
               "времени регистрации в боте; ваш номер в очереди придёт сюда, когда "
               "продажа начнётся.",
@@ -362,8 +363,8 @@ _T: dict[str, dict[str, str]] = {
               "sent here when the sale starts.",
     },
     "ntf_checkin_late_prequeue": {
-        "uz": "✅ Qayd etildi (№{number}). Siz kun oxiri (oxirgi) navbatga qo'shildingiz."
-              "\n\nSizning tartib raqamingiz: {position}.\n\nSotuv {time} da boshlanadi.",
+        "uz": "✅ Qayd etildi (№{number}). Siz kun oxiri (oxirgi) navbatga qo'shildingiz. "
+              "Sotuv {time} da boshlanadi — tartibingiz keyin xabar qilinadi.",
         "ru": "✅ Отмечено (№{number}). Вы добавлены в очередь конца дня. Продажа начнётся "
               "в {time} — ваш порядок сообщим позже.",
         "en": "✅ Recorded (№{number}). You joined the end-of-day queue. The sale starts at "
