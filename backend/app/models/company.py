@@ -8,7 +8,7 @@ from app.db.base import Base, UTCDateTime, now_utc
 # Telegram caps a single bot at ~30 messages/second, so companies expecting a
 # registration rush (up to ~10 000 sign-ups a minute on sale days) may connect
 # several bots that serve the same queue in parallel.
-MAX_BOTS_PER_COMPANY = 3
+MAX_BOTS_PER_COMPANY = 10
 
 
 class Company(Base):

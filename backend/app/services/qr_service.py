@@ -89,12 +89,19 @@ def qr_data_url(data: str, box_size: int = 8) -> str:
 
 _pool: ProcessPoolExecutor | None = None
 
+# Measured ~100-105 images/s with 4 workers (each render is ~40ms of pure
+# Python CPU); 6 leaves 2 cores free for the event loop and other container
+# work. Matches the bot service's CPU ceiling bump in docker-compose.prod.yml
+# — raising one without the other does nothing, since Docker's cgroup CPU
+# quota caps total usage regardless of worker count.
+_QR_POOL_WORKERS = min(6, os.cpu_count() or 1)
+
 
 def _get_pool() -> ProcessPoolExecutor:
     global _pool
     if _pool is None:
         _pool = ProcessPoolExecutor(
-            max_workers=min(4, os.cpu_count() or 1),
+            max_workers=_QR_POOL_WORKERS,
             mp_context=multiprocessing.get_context("spawn"),
         )
     return _pool

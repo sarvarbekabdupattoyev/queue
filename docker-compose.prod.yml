@@ -78,9 +78,14 @@ services:
     restart: unless-stopped
 
   bot:
+    # 4 CPUs (up from 2): the QR process pool now uses up to 6 workers
+    # (qr_service.py) — those workers only get real throughput if the
+    # container's own cgroup ceiling allows it. Box is 8 vCPU total; this
+    # raises the documented over-commit from 12 to 14 CPU-ceiling-units,
+    # still fine as a ceiling (not a reservation) on an otherwise idle host.
     deploy:
       resources:
-        limits: { cpus: "2", memory: 1536m }
+        limits: { cpus: "4", memory: 2g }
     ulimits:
       nofile: { soft: 65535, hard: 65535 }
     healthcheck:
