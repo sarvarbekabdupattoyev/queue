@@ -69,6 +69,11 @@ class Ticket(Base):
     queue_order: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     late: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # sale outcome, answered by the manager when finishing the client:
+    # True = a contract was signed, False = no contract, NULL = not recorded
+    # (ticket not finished yet, or finished before this question existed)
+    contract_signed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     registered_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now_utc)
     checked_in_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     called_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

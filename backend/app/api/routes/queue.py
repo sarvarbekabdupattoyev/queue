@@ -8,6 +8,7 @@ from app.models import Branch, Desk, Ticket, User, UserRole
 from app.schemas.event import (
     CallNextRequest,
     CheckinRequest,
+    DoneRequest,
     TicketActionRequest,
     TicketOut,
     WalkinCreate,
@@ -203,14 +204,20 @@ async def skip(
 
 @router.post("/{event_id}/done")
 async def done(
-    payload: TicketActionRequest, db: DbSession, event: CompanyEvent, user: ManagerUser
+    payload: DoneRequest, db: DbSession, event: CompanyEvent, user: ManagerUser
 ) -> dict:
     ticket = await _load_ticket(db, event, payload.number, user)
     try:
-        await queue_service.finish(db, event, ticket)
+        await queue_service.finish(db, event, ticket, contract_signed=payload.contract_signed)
     except DomainError as exc:
         _raise(exc)
-    return {"ok": True, "message": f"№{ticket.number} yakunlandi", "ticket": _out(ticket)}
+    if payload.contract_signed is None:
+        message = f"№{ticket.number} yakunlandi"
+    elif payload.contract_signed:
+        message = f"№{ticket.number} yakunlandi — shartnoma tuzildi"
+    else:
+        message = f"№{ticket.number} yakunlandi — shartnoma tuzilmadi"
+    return {"ok": True, "message": message, "ticket": _out(ticket)}
 
 
 @router.post("/{event_id}/cancel")

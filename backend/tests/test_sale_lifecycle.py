@@ -242,6 +242,61 @@ async def test_walkin_roles_scanner_yes_manager_no(client):
     assert forbidden.status_code == 403
 
 
+# ---------------------------------------------------------- sale outcome ---
+
+async def test_done_records_contract_outcome_in_stats(client):
+    """Finishing a client stores the manager's "contract signed?" answer; the
+    counters reach the staff stats and the owner overview but never the
+    public display payload."""
+    token, desk_ids = await setup_company(client, desks=1)
+    event = await create_event(client, token)
+    numbers = []
+    for i, offset in enumerate((-300, -200, -100)):
+        ticket = await make_ticket(event["id"], f"+99890100000{i + 1}", offset)
+        numbers.append(ticket["number"])
+        await checkin(client, token, event["id"], ticket["number"])
+    await close_checkin_window(client, token, event["id"])
+
+    async def serve(number, extra):
+        called = await client.post(
+            f"/api/queue/{event['id']}/call", json={"desk_id": desk_ids[0]}, headers=auth(token)
+        )
+        assert called.status_code == 200 and called.json()["ticket"]["number"] == number
+        done = await client.post(
+            f"/api/queue/{event['id']}/done",
+            json={"number": number, **extra},
+            headers=auth(token),
+        )
+        assert done.status_code == 200, done.text
+        return done.json()
+
+    first = await serve(numbers[0], {"contract_signed": True})
+    assert first["ticket"]["contract_signed"] is True
+    assert "shartnoma tuzildi" in first["message"]
+    second = await serve(numbers[1], {"contract_signed": False})
+    assert second["ticket"]["contract_signed"] is False
+    assert "shartnoma tuzilmadi" in second["message"]
+    # a caller that never asks the question leaves the outcome unrecorded
+    third = await serve(numbers[2], {})
+    assert third["ticket"]["contract_signed"] is None
+
+    state = (await client.get(f"/api/events/{event['id']}/state", headers=auth(token))).json()
+    assert state["stats"]["done"] == 3
+    assert state["stats"]["contracts"] == 1
+    assert state["stats"]["no_contract"] == 1
+
+    # the public TV payload never carries the sale outcome
+    display_code = (await get_event(client, token, event["id"]))["display_code"]
+    public = (await client.get(f"/api/public/display/{display_code}")).json()
+    assert "contracts" not in public["stats"] and "no_contract" not in public["stats"]
+
+    overview = (await client.get("/api/stats/overview", headers=auth(token))).json()
+    assert overview["totals"]["contracts"] == 1
+    assert overview["totals"]["no_contract"] == 1
+    assert overview["daily"][-1]["contracts"] == 1
+    assert overview["events"][-1]["contracts"] == 1
+
+
 # ------------------------------------------------- sale-start notifications ---
 
 async def test_sale_start_burst_sends_position_and_ms_time_once(client, monkeypatch):

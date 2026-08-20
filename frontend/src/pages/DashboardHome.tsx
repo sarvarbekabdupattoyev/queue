@@ -142,6 +142,10 @@ export default function DashboardHome() {
               <div className="big">{stats?.totals.served ?? '—'}</div>
               <div className="delta">xizmat yakunlangan</div>
             </div>
+            <div>
+              <div className="big">{stats?.totals.contracts ?? '—'}</div>
+              <div className="delta">shartnoma tuzilgan</div>
+            </div>
           </div>
           {stats ? (
             <LineChart

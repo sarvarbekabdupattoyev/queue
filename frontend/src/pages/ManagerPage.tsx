@@ -12,7 +12,7 @@ import {
   IconSkip,
   IconSound,
 } from '../components/icons'
-import { useConfirm, useToast } from '../components/ui'
+import { Modal, useConfirm, useToast } from '../components/ui'
 import { formatCountdown, formatLongCountdown } from '../lib/format'
 import { useCallSound } from '../lib/useCallSound'
 import { useLiveState, useTick } from '../lib/useLiveState'
@@ -31,6 +31,9 @@ export default function ManagerPage() {
     return saved ? Number(saved) : null
   })
   const [busy, setBusy] = useState(false)
+  // the client "Yakunlash" was pressed for — the contract question is asked
+  // in a dialog before the finish request goes out
+  const [finishing, setFinishing] = useState<{ number: string; name: string } | null>(null)
 
   const { data: allDesks } = useQuery({ queryKey: ['desks'], queryFn: () => api<Desk[]>('/desks') })
   // a branch manager works only with their branch's desks
@@ -128,6 +131,14 @@ export default function ManagerPage() {
     }
   }
 
+  // finish the client with the sale outcome the manager picked in the dialog
+  const finishWith = async (contractSigned: boolean) => {
+    if (!finishing) return
+    const number = finishing.number
+    setFinishing(null)
+    await act('done', { number, contract_signed: contractSigned })
+  }
+
   const calledLeft = mine?.called_at ? timeoutMs - (now - new Date(mine.called_at).getTime()) : 0
 
   return (
@@ -166,6 +177,7 @@ export default function ManagerPage() {
       }
     >
       {() => (
+        <>
         <div className="grid-2 split">
           <div>
             <div className="card">
@@ -254,7 +266,7 @@ export default function ManagerPage() {
                 <button
                   className="btn amber big"
                   disabled={busy || !mine}
-                  onClick={() => mine && act('done', { number: mine.number })}
+                  onClick={() => mine && setFinishing({ number: mine.number, name: mine.name })}
                 >
                   <IconFlag size={18} /> Yakunlash
                 </button>
@@ -276,6 +288,10 @@ export default function ManagerPage() {
                   <div className="stat">
                     <b>{stats.done}</b>
                     <span>Yakunlandi</span>
+                  </div>
+                  <div className="stat">
+                    <b>{stats.contracts ?? 0}</b>
+                    <span>Shartnoma</span>
                   </div>
                 </div>
               )}
@@ -323,6 +339,39 @@ export default function ManagerPage() {
             )}
           </div>
         </div>
+
+        {finishing && (
+          <Modal
+            title={`№${finishing.number} — yakunlash`}
+            description={`${finishing.name} bilan shartnoma tuzildimi? Javob sotuv statistikasiga yoziladi.`}
+            onClose={() => setFinishing(null)}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <button
+                type="button"
+                className="btn teal big"
+                disabled={busy}
+                onClick={() => void finishWith(true)}
+              >
+                <IconCheck size={18} /> Shartnoma tuzildi
+              </button>
+              <button
+                type="button"
+                className="btn coral big"
+                disabled={busy}
+                onClick={() => void finishWith(false)}
+              >
+                Shartnoma tuzilmadi
+              </button>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn ghost" onClick={() => setFinishing(null)}>
+                Bekor qilish
+              </button>
+            </div>
+          </Modal>
+        )}
+        </>
       )}
     </StaffShell>
   )

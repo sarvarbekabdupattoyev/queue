@@ -55,7 +55,8 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
   (hold / resume / end / reopen), a branch multiselect and an unguessable public display link
   (`?branch=` pins a TV to one branch).
 - **Owner statistics** — `/api/stats/overview` aggregates for the dashboard charts: daily
-  registrations/arrivals, hourly load, recent events and per-branch breakdown.
+  registrations/arrivals, hourly load, recent events, per-branch breakdown and the sale
+  outcome (contracts signed vs. finished without a contract).
 - **Up to 3 parallel Telegram bots per company** (aiogram): trilingual conversation —
   the client picks O'zbek / Русский / English on first `/start` (inline buttons, stored per
   chat, switchable from the menu) and everything, including queue notifications, follows that
@@ -74,7 +75,9 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 - **Scanner page** — USB scanner / manual entry (auto-focused input) and in-browser camera QR
   scanning (jsQR); big color-coded result states, on-time vs end-of-day feedback.
 - **Manager panel** — call next / arrived / no-show / re-call / finish, call timer, other desks,
-  live waiting list.
+  live waiting list. Finishing asks **"was a contract signed?"** — the answer is stored on the
+  ticket and feeds the sale-outcome statistics (staff screens and owner dashboards only, never
+  the public display).
 - **Client ticket page** — `/t/{code}` public status page with QR, position and desk.
 
 ## Architecture

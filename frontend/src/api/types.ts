@@ -119,6 +119,9 @@ export interface Ticket {
   status: TicketStatus
   late: boolean
   source: 'bot' | 'staff' | 'seed'
+  /** sale outcome recorded at finish: true = contract signed, false = no
+   * contract, null = not recorded */
+  contract_signed: boolean | null
   branch_id: number | null
   branch_name: string | null
   registered_at: string
@@ -157,6 +160,10 @@ export interface QueueStats {
   late: number
   /** walk-ins added at the door by the owner/scanner */
   staff_added: number
+  /** finished with a signed contract — staff payload only, never public */
+  contracts?: number
+  /** finished without a contract — staff payload only, never public */
+  no_contract?: number
 }
 
 /** One waiting ticket as the public TV board shows it: the 4-letter code,
@@ -238,6 +245,7 @@ export interface StatsDaily {
   registered: number
   arrived: number
   served: number
+  contracts: number
 }
 
 export interface StatsEventRow {
@@ -250,6 +258,7 @@ export interface StatsEventRow {
   arrived: number
   served: number
   skipped: number
+  contracts: number
 }
 
 export interface StatsBranchRow {
@@ -259,6 +268,7 @@ export interface StatsBranchRow {
   registered: number
   arrived: number
   served: number
+  contracts: number
 }
 
 export interface StatsOverview {
@@ -270,6 +280,10 @@ export interface StatsOverview {
     skipped: number
     cancelled: number
     late: number
+    /** served clients who signed a contract */
+    contracts: number
+    /** served clients who explicitly did not sign */
+    no_contract: number
     events: number
   }
   avg_wait_minutes: number | null

@@ -176,6 +176,7 @@ async def test_stats_overview_counts_and_roles(client):
             "registered": 5,
             "arrived": 3,
             "served": 0,
+            "contracts": 0,
         }
     ]
 

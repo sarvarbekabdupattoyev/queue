@@ -152,21 +152,44 @@ async def desk_numbers_for(db: AsyncSession, tickets: list[Ticket]) -> dict[int,
 
 # ----------------------------------------------------------- state payloads ---
 
+# Sale-outcome counters (contract signed / not signed) are business figures —
+# they belong to staff screens only and never reach the public TV payload.
+STAFF_ONLY_STATS = ("contracts", "no_contract")
+
+
 class _Tally:
     """Mutable per-scope counters: by status, plus the admin metrics the
-    product tracks separately — late comers and staff-added walk-ins."""
+    product tracks separately — late comers, staff-added walk-ins and the
+    sale outcome (contract signed or not) of finished clients."""
 
     def __init__(self) -> None:
         self.by_status: dict[TicketStatus, int] = {}
         self.late = 0
         self.staff_added = 0
+        self.contracts = 0
+        self.no_contract = 0
 
-    def add(self, status: TicketStatus, late: bool, source: TicketSource, count: int) -> None:
+    def add(
+        self,
+        status: TicketStatus,
+        late: bool,
+        source: TicketSource,
+        contract_signed: bool | None,
+        count: int,
+    ) -> None:
         self.by_status[status] = self.by_status.get(status, 0) + count
         if late:
             self.late += count
         if source == TicketSource.STAFF:
             self.staff_added += count
+        # the outcome is only meaningful on finished clients; NULL = the
+        # question was never answered (e.g. tickets finished before the
+        # feature existed) and counts in neither bucket
+        if status == TicketStatus.DONE and contract_signed is not None:
+            if contract_signed:
+                self.contracts += count
+            else:
+                self.no_contract += count
 
 
 def _stats_from(tally: "_Tally | None" = None) -> dict[str, int]:
@@ -186,6 +209,8 @@ def _stats_from(tally: "_Tally | None" = None) -> dict[str, int]:
         "skipped": by_status.get(TicketStatus.SKIPPED, 0),
         "late": tally.late,
         "staff_added": tally.staff_added,
+        "contracts": tally.contracts,
+        "no_contract": tally.no_contract,
     }
 
 
@@ -195,17 +220,32 @@ async def _stats_by_branch(
     """Overall stats plus a per-branch breakdown in a single grouped query."""
     rows = (
         await db.execute(
-            select(Ticket.branch_id, Ticket.status, Ticket.late, Ticket.source, func.count())
+            select(
+                Ticket.branch_id,
+                Ticket.status,
+                Ticket.late,
+                Ticket.source,
+                Ticket.contract_signed,
+                func.count(),
+            )
             .where(Ticket.event_id == event_id)
-            .group_by(Ticket.branch_id, Ticket.status, Ticket.late, Ticket.source)
+            .group_by(
+                Ticket.branch_id,
+                Ticket.status,
+                Ticket.late,
+                Ticket.source,
+                Ticket.contract_signed,
+            )
         )
     ).all()
     overall = _Tally()
     per_branch: dict[int, _Tally] = {}
-    for branch_id, status, late, source, count in rows:
-        overall.add(status, late, source, count)
+    for branch_id, status, late, source, contract_signed, count in rows:
+        overall.add(status, late, source, contract_signed, count)
         if branch_id is not None:
-            per_branch.setdefault(branch_id, _Tally()).add(status, late, source, count)
+            per_branch.setdefault(branch_id, _Tally()).add(
+                status, late, source, contract_signed, count
+            )
     return _stats_from(overall), {b: _stats_from(t) for b, t in per_branch.items()}
 
 
@@ -264,6 +304,11 @@ async def build_states(
             "stats": branch_stats.get(branch_id, _stats_from()),
         }
 
+    def public_stats(values: dict[str, int]) -> dict[str, int]:
+        """The TV board exposes the minimum — sale outcomes stay staff-only."""
+        return {k: v for k, v in values.items() if k not in STAFF_ONLY_STATS}
+
+    staff_by_branch = [branch_section(b.id) for b in branches]
     public_state: dict[str, Any] = {
         "type": "state",
         "event": _event_info(event, company),
@@ -281,8 +326,8 @@ async def build_states(
             for t in active
         ],
         "next": [queue_entry(t) for t in waiting[:12]],
-        "by_branch": [branch_section(b.id) for b in branches],
-        "stats": stats,
+        "by_branch": [{**s, "stats": public_stats(s["stats"])} for s in staff_by_branch],
+        "stats": public_stats(stats),
     }
 
     branch_positions: dict[int | None, int] = {}
@@ -311,6 +356,8 @@ async def build_states(
 
     staff_state: dict[str, Any] = {
         **public_state,
+        "stats": stats,
+        "by_branch": staff_by_branch,
         "waiting_list": [staff_view(t, waiting_entry=True) for t in waiting],
         "active": [staff_view(t) for t in active],
     }
@@ -581,10 +628,17 @@ async def skip(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
     return ticket
 
 
-async def finish(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
+async def finish(
+    db: AsyncSession,
+    event: SaleEvent,
+    ticket: Ticket,
+    contract_signed: bool | None = None,
+) -> Ticket:
     if ticket.status not in TicketStatus.active_desk_statuses():
         raise DomainError("Faqat stoldagi mijozni yakunlash mumkin")
     ticket.status = TicketStatus.DONE
+    # the manager's answer to "was a contract signed?" — the sale outcome
+    ticket.contract_signed = contract_signed
     ticket.finished_at = now_utc()
     await db.commit()
     await _maybe_end_sale(db, event)

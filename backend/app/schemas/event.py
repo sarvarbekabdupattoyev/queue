@@ -115,6 +115,9 @@ class TicketOut(BaseModel):
     status: TicketStatus
     late: bool
     source: TicketSource
+    # sale outcome recorded at finish: True = contract signed, False = no
+    # contract, None = not recorded
+    contract_signed: bool | None = None
     branch_id: int | None = None
     branch_name: str | None = None
     registered_at: datetime
@@ -153,6 +156,13 @@ class TicketActionRequest(BaseModel):
     @classmethod
     def _normalize_number(cls, v: str) -> str:
         return normalize_ticket_number(v)
+
+
+class DoneRequest(TicketActionRequest):
+    """Finishing a client also records the sale outcome the manager picked
+    in the "was a contract signed?" dialog (None = not answered)."""
+
+    contract_signed: bool | None = None
 
 
 class SeedRequest(BaseModel):

@@ -97,6 +97,12 @@ export default function StatsPage() {
                 </div>
               </div>
               <div>
+                <div className="big">{totals.contracts}</div>
+                <div className="delta">
+                  shartnoma tuzilgan · <b>{pct(totals.contracts, totals.served)}</b>
+                </div>
+              </div>
+              <div>
                 <div className="big">
                   {data.avg_wait_minutes ?? '—'}
                   {data.avg_wait_minutes !== null && <span style={{ fontSize: 18 }}> daq</span>}
@@ -122,6 +128,7 @@ export default function StatsPage() {
                   { name: 'Yozilganlar', color: 'var(--pastel-blue2)', values: data.daily.map((d) => d.registered) },
                   { name: 'Kelganlar', color: 'var(--pastel-green2)', values: data.daily.map((d) => d.arrived) },
                   { name: 'Yakunlanganlar', color: 'var(--pastel-pink2)', values: data.daily.map((d) => d.served) },
+                  { name: 'Shartnomalar', color: 'var(--pastel-cream2)', values: data.daily.map((d) => d.contracts) },
                 ]}
                 height={200}
               />
@@ -140,7 +147,9 @@ export default function StatsPage() {
               />
               <p className="hint" style={{ marginTop: 14 }}>
                 Kun oxiri navbatiga tushganlar: <b className="mono">{totals.late}</b> · bekor
-                qilinganlar: <b className="mono">{totals.cancelled}</b>
+                qilinganlar: <b className="mono">{totals.cancelled}</b> · shartnoma tuzilgan:{' '}
+                <b className="mono">{totals.contracts}</b> · shartnomasiz yakunlangan:{' '}
+                <b className="mono">{totals.no_contract}</b>
               </p>
             </div>
           </div>
@@ -162,6 +171,7 @@ export default function StatsPage() {
                   series={[
                     { name: 'Yozilganlar', color: 'var(--pastel-blue)', values: data.events.map((e) => e.registered) },
                     { name: 'Kelganlar', color: 'var(--pastel-green2)', values: data.events.map((e) => e.arrived) },
+                    { name: 'Shartnomalar', color: 'var(--pastel-cream2)', values: data.events.map((e) => e.contracts) },
                   ]}
                   height={220}
                 />
@@ -200,6 +210,7 @@ export default function StatsPage() {
                       <th style={{ textAlign: 'right' }}>Yozilgan</th>
                       <th style={{ textAlign: 'right' }}>Kelgan</th>
                       <th style={{ textAlign: 'right' }}>Yakunlangan</th>
+                      <th style={{ textAlign: 'right' }}>Shartnoma</th>
                       <th style={{ textAlign: 'right' }}>Kelish darajasi</th>
                     </tr>
                   </thead>
@@ -211,6 +222,7 @@ export default function StatsPage() {
                         <td className="mono" style={{ textAlign: 'right' }}>{b.registered}</td>
                         <td className="mono" style={{ textAlign: 'right' }}>{b.arrived}</td>
                         <td className="mono" style={{ textAlign: 'right' }}>{b.served}</td>
+                        <td className="mono" style={{ textAlign: 'right' }}>{b.contracts}</td>
                         <td style={{ textAlign: 'right' }}>
                           <span className="badge teal">{pct(b.arrived, b.registered)}</span>
                         </td>

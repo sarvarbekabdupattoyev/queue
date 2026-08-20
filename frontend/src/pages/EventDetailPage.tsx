@@ -244,6 +244,14 @@ export default function EventDetailPage() {
             <span>Yakunlandi</span>
           </div>
           <div className="stat">
+            <b>{stats?.contracts ?? '—'}</b>
+            <span>Shartnoma tuzildi</span>
+          </div>
+          <div className="stat">
+            <b>{stats?.no_contract ?? '—'}</b>
+            <span>Shartnomasiz</span>
+          </div>
+          <div className="stat">
             <b>{stats?.skipped ?? '—'}</b>
             <span>Kelmadi</span>
           </div>
@@ -263,7 +271,7 @@ export default function EventDetailPage() {
                 <span style={{ fontWeight: 600 }}>{b.name}</span>
                 <span className="muted mono">
                   {b.stats.registered} yozilgan · {b.stats.arrived} kelgan · {b.stats.waiting}{' '}
-                  kutmoqda · {b.stats.done} yakunlandi
+                  kutmoqda · {b.stats.done} yakunlandi · {b.stats.contracts ?? 0} shartnoma
                 </span>
               </div>
             ))}
@@ -377,7 +385,13 @@ export default function EventDetailPage() {
                       <td className="muted">{formatDateTime(ticket.registered_at)}</td>
                       <td>
                         <span className={`badge ${label.tone}`}>{label.text}</span>{' '}
-                        {ticket.late && <span className="badge amber">kun oxiri</span>}
+                        {ticket.late && <span className="badge amber">kun oxiri</span>}{' '}
+                        {ticket.status === 'done' && ticket.contract_signed === true && (
+                          <span className="badge teal">shartnoma</span>
+                        )}
+                        {ticket.status === 'done' && ticket.contract_signed === false && (
+                          <span className="badge dim">shartnomasiz</span>
+                        )}
                       </td>
                       <td>
                         <span className="row-actions">
@@ -431,6 +445,12 @@ export default function EventDetailPage() {
                     <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                       <span className={`badge ${label.tone}`}>{label.text}</span>
                       {ticket.late && <span className="badge amber">kun oxiri</span>}
+                      {ticket.status === 'done' && ticket.contract_signed === true && (
+                        <span className="badge teal">shartnoma</span>
+                      )}
+                      {ticket.status === 'done' && ticket.contract_signed === false && (
+                        <span className="badge dim">shartnomasiz</span>
+                      )}
                     </span>
                   </span>
                   {!['done', 'cancelled'].includes(ticket.status) && (
