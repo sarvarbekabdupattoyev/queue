@@ -62,7 +62,7 @@ from app.services.i18n import (
     status_label,
     t,
 )
-from app.services.qr_service import ticket_qr_png_bytes_async
+from app.services.qr_service import qr_png_bytes_async
 
 log = logging.getLogger(__name__)
 
@@ -269,9 +269,11 @@ async def _send_ticket(
         status=status_label(lang, ticket.status),
     )
     # PIL work happens in the process pool — a burst of registrations must not
-    # serialize on QR rendering in the event loop. The photo carries the
-    # 4-letter code in large print under the QR so it is readable at a glance.
-    png = await ticket_qr_png_bytes_async(ticket.code, f"№{ticket.number}")
+    # serialize on QR rendering in the event loop. Plain code only, no drawn
+    # label: the caption above already shows "№{number}" as real text, and a
+    # PIL-rendered "№" glyph was missing from the fallback font, rendering as
+    # a broken tofu box on some deployments.
+    png = await qr_png_bytes_async(ticket.code)
     photo = BufferedInputFile(png, filename=f"navbat-{ticket.number}.png")
     await message.answer_photo(photo=photo, caption=caption, reply_markup=main_menu(lang))
 
