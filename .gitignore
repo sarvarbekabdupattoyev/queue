@@ -1,6 +1,10 @@
 .env
 .DS_Store
 
+# local python virtualenvs
+.venv/
+venv/
+
 # local runtime / deploy artifacts
 *.log
 tunnel_url.txt
