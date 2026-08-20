@@ -20,6 +20,8 @@ workflow data), so N bots — including several parallel bots of ONE company —
 share one code path, one FSM storage (keys are bot-scoped) and no closures.
 """
 
+import asyncio
+import json
 import logging
 import re
 from contextlib import suppress
@@ -46,6 +48,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.phone import normalize_phone, pretty_phone
+from app.core.redis import get_redis
 from app.db.base import now_utc
 from app.db.session import SessionFactory
 from app.models import Branch, BotUser, Company, SaleEvent, Ticket, TicketStatus
@@ -74,6 +77,10 @@ BTN_TICKET_ALL = {t(lang, "btn_ticket") for lang in LANGS}
 BTN_STATUS_ALL = {t(lang, "btn_status") for lang in LANGS}
 BTN_INFO_ALL = {t(lang, "btn_info") for lang in LANGS}
 BTN_LANG_ALL = {t(lang, "btn_language") for lang in LANGS}
+
+DEAD_LETTER_KEY = "navbat:dead-letter:registrations"
+_REGISTRATION_RETRY_ATTEMPTS = 3
+_REGISTRATION_RETRY_BASE_DELAY = 0.5  # seconds; multiplied by attempt number
 
 
 class Registration(StatesGroup):
@@ -715,6 +722,43 @@ async def fallback(message: Message, state: FSMContext, company_id: int) -> None
     await message.answer(t(lang, "start_over"), reply_markup=menu)
 
 
+async def _dead_letter_registration(
+    *,
+    company_id: int,
+    bot_db_id: int,
+    chat_id: int,
+    event_id: int | None,
+    branch_id: int | None,
+    first_name: str,
+    last_name: str,
+    phone: str,
+    error: str,
+) -> None:
+    """Best-effort durable record of a registration that failed after
+    retries, so it can be replayed instead of silently lost. Redis-only (no
+    schema migration needed); if Redis is also unavailable the caller's own
+    log.exception is the last line of defence."""
+    redis = get_redis()
+    if redis is None:
+        return
+    payload = json.dumps(
+        {
+            "company_id": company_id,
+            "bot_id": bot_db_id,
+            "chat_id": chat_id,
+            "event_id": event_id,
+            "branch_id": branch_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "phone": phone,
+            "error": error,
+            "failed_at": now_utc().isoformat(),
+        }
+    )
+    with suppress(Exception):
+        await redis.lpush(DEAD_LETTER_KEY, payload)
+
+
 async def _finish_registration(
     message: Message,
     state: FSMContext,
@@ -729,56 +773,101 @@ async def _finish_registration(
         await message.answer(t(lang, "phone_invalid"), reply_markup=phone_keyboard(lang))
         return
     data = await state.get_data()
-    async with SessionFactory() as session:
-        event = await session.get(SaleEvent, data["event_id"])
-        if event is None or not event.registration_open():
-            await state.clear()
-            menu = await _menu_for(session, company_id, message.chat.id, lang)
-            # the owner can move the opening time while a client is mid-flow:
-            # answer with the full "sale has not started" card, not "closed"
-            text = None
-            if event is not None and event.registration_pending():
-                text = await _prestart_info_text(session, company_id, [event], lang)
-            await message.answer(text or t(lang, "registration_closed"), reply_markup=menu)
-            return
-        # one phone = one ticket per event: a duplicate gets the existing one
-        existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
-        if existing is not None:
-            await state.clear()
-            if existing.telegram_chat_id is None or existing.bot_id is None:
-                if existing.telegram_chat_id is None:
-                    existing.telegram_chat_id = message.chat.id
-                if existing.bot_id is None:
-                    existing.bot_id = bot_db_id
-                await session.commit()
-            await message.answer(t(lang, "phone_taken"), reply_markup=main_menu(lang))
-            await _send_ticket(message, session, existing, lang)
-            return
+
+    # Transient failures (DB/connection hiccups etc.) get a couple of retries
+    # on a FRESH session each time before giving up — DomainError is a real
+    # rejection and is handled inline below, never retried. Retrying the
+    # whole block is safe: the phone-existing-ticket check makes it
+    # idempotent even if a prior attempt actually committed before failing.
+    for attempt in range(1, _REGISTRATION_RETRY_ATTEMPTS + 1):
         try:
-            ticket = await ticket_service.create_ticket(
-                session,
-                event,
-                first_name=data["first_name"],
-                last_name=data["last_name"],
-                phone=phone,
-                telegram_chat_id=message.chat.id,
-                branch_id=data.get("branch_id"),
-                bot_id=bot_db_id,
+            async with SessionFactory() as session:
+                event = await session.get(SaleEvent, data["event_id"])
+                if event is None or not event.registration_open():
+                    await state.clear()
+                    menu = await _menu_for(session, company_id, message.chat.id, lang)
+                    # the owner can move the opening time while a client is mid-flow:
+                    # answer with the full "sale has not started" card, not "closed"
+                    text = None
+                    if event is not None and event.registration_pending():
+                        text = await _prestart_info_text(session, company_id, [event], lang)
+                    await message.answer(text or t(lang, "registration_closed"), reply_markup=menu)
+                    return
+                # one phone = one ticket per event: a duplicate gets the existing one
+                existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
+                if existing is not None:
+                    await state.clear()
+                    if existing.telegram_chat_id is None or existing.bot_id is None:
+                        if existing.telegram_chat_id is None:
+                            existing.telegram_chat_id = message.chat.id
+                        if existing.bot_id is None:
+                            existing.bot_id = bot_db_id
+                        await session.commit()
+                    await message.answer(t(lang, "phone_taken"), reply_markup=main_menu(lang))
+                    await _send_ticket(message, session, existing, lang)
+                    return
+                try:
+                    ticket = await ticket_service.create_ticket(
+                        session,
+                        event,
+                        first_name=data["first_name"],
+                        last_name=data["last_name"],
+                        phone=phone,
+                        telegram_chat_id=message.chat.id,
+                        branch_id=data.get("branch_id"),
+                        bot_id=bot_db_id,
+                    )
+                except DomainError as exc:
+                    await state.clear()
+                    menu = await _menu_for(session, company_id, message.chat.id, lang)
+                    await message.answer(exc.message, reply_markup=menu)
+                    return
+                await state.clear()
+                queue_service.schedule_event_broadcast(event.id)
+                # a registration after the scanning window still gets a QR, but the
+                # client is told up front they will join the end-of-day queue
+                late_born = ticket.registered_at >= event.checkin_until
+                ok_key = "registered_ok_late" if late_born else "registered_ok"
+                await message.answer(t(lang, ok_key), reply_markup=main_menu(lang))
+                await _send_ticket(message, session, ticket, lang)
+                log.info(
+                    "New ticket #%s (%s) for event %s via bot", ticket.number, phone, event.id
+                )
+                return
+        except Exception as exc:
+            if attempt == _REGISTRATION_RETRY_ATTEMPTS:
+                log.exception(
+                    "Registration failed after %s attempts (phone %s, event %s)",
+                    attempt,
+                    phone,
+                    data.get("event_id"),
+                )
+                await _dead_letter_registration(
+                    company_id=company_id,
+                    bot_db_id=bot_db_id,
+                    chat_id=message.chat.id,
+                    event_id=data.get("event_id"),
+                    branch_id=data.get("branch_id"),
+                    first_name=data.get("first_name", ""),
+                    last_name=data.get("last_name", ""),
+                    phone=phone,
+                    error=repr(exc),
+                )
+                await state.clear()
+                with suppress(Exception):
+                    await message.answer(
+                        t(lang, "registration_retry_later"),
+                        reply_markup=main_menu(lang, registered=False),
+                    )
+                return
+            log.warning(
+                "Registration attempt %s/%s failed transiently (phone %s): %s",
+                attempt,
+                _REGISTRATION_RETRY_ATTEMPTS,
+                phone,
+                exc,
             )
-        except DomainError as exc:
-            await state.clear()
-            menu = await _menu_for(session, company_id, message.chat.id, lang)
-            await message.answer(exc.message, reply_markup=menu)
-            return
-        await state.clear()
-        queue_service.schedule_event_broadcast(event.id)
-        # a registration after the scanning window still gets a QR, but the
-        # client is told up front they will join the end-of-day queue
-        late_born = ticket.registered_at >= event.checkin_until
-        ok_key = "registered_ok_late" if late_born else "registered_ok"
-        await message.answer(t(lang, ok_key), reply_markup=main_menu(lang))
-        await _send_ticket(message, session, ticket, lang)
-        log.info("New ticket #%s (%s) for event %s via bot", ticket.number, phone, event.id)
+            await asyncio.sleep(_REGISTRATION_RETRY_BASE_DELAY * attempt)
 
 
 async def menu_ticket(message: Message, company_id: int) -> None:

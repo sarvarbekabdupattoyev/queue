@@ -228,6 +228,14 @@ _T: dict[str, dict[str, str]] = {
         "ru": "К сожалению, регистрация на это мероприятие закрылась.",
         "en": "Unfortunately, registration for this event has closed.",
     },
+    "registration_retry_later": {
+        "uz": "Ro'yxatga olishda vaqtinchalik xatolik yuz berdi. Ma'lumotlaringiz saqlab qolindi — "
+              "iltimos, bir necha daqiqadan so'ng /start ni qayta bosing.",
+        "ru": "Временная ошибка при регистрации. Ваши данные сохранены — "
+              "пожалуйста, нажмите /start ещё раз через несколько минут.",
+        "en": "A temporary error occurred during registration. Your details were saved — "
+              "please press /start again in a few minutes.",
+    },
     "registered_ok": {"uz": "✅ Ro'yxatdan o'tdingiz!", "ru": "✅ Вы зарегистрированы!", "en": "✅ You are registered!"},
     "registered_ok_late": {
         "uz": "✅ Ro'yxatga olindingiz! Skanerlash davri tugagani uchun QR skanerlangach "
