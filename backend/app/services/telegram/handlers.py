@@ -22,6 +22,7 @@ share one code path, one FSM storage (keys are bot-scoped) and no closures.
 
 import asyncio
 import json
+import html
 import logging
 import re
 from contextlib import suppress
@@ -411,18 +412,28 @@ def build_prestart_text(
                 t(
                     lang,
                     "prestart_no_name_line",
-                    opens=queue_service.fmt_local(e.registration_starts_at),
-                    sale=queue_service.fmt_local(e.sale_starts_at),
+                    opens_date=e.registration_starts_at.astimezone(
+                        queue_service.TASHKENT
+                    ).strftime("%d.%m.%Y"),
+                    sale_time=e.sale_starts_at.astimezone(queue_service.TASHKENT).strftime(
+                        "%H:%M"
+                    ),
+                    sale_date=e.sale_starts_at.astimezone(queue_service.TASHKENT).strftime(
+                        "%d.%m.%Y"
+                    ),
                 )
                 for e in events
             )
         )
     blocks.append(t(lang, "prestart_channel_note"))
-    location_lines = _location_lines(lang, company, branches)
+    # HTML parse mode is on for this message (the labels above are <b> bold),
+    # so anything below built from staff-entered data must be escaped —
+    # build_info_text's plain-text version of these same lines is untouched.
+    location_lines = [html.escape(line) for line in _location_lines(lang, company, branches)]
     if location_lines:
         blocks.append(t(lang, "info_locations_header") + ":\n" + "\n".join(location_lines))
     blocks.append(t(lang, "prestart_how"))
-    phone_lines = _phone_lines(company)
+    phone_lines = [html.escape(line) for line in _phone_lines(company)]
     if phone_lines:
         blocks.append(t(lang, "info_phones_header") + ":\n" + "\n".join(phone_lines))
     return "\n\n".join(blocks)
@@ -511,7 +522,7 @@ async def _start_flow(
         if pending:
             text = await _prestart_info_text(session, company_id, pending, lang)
             if text is not None:
-                await message.answer(text, reply_markup=menu)
+                await message.answer(text, reply_markup=menu, parse_mode="HTML")
                 return
         await message.answer(t(lang, "no_open_events"), reply_markup=menu)
         return
@@ -810,7 +821,10 @@ async def _finish_registration(
                     text = None
                     if event is not None and event.registration_pending():
                         text = await _prestart_info_text(session, company_id, [event], lang)
-                    await message.answer(text or t(lang, "registration_closed"), reply_markup=menu)
+                    if text is not None:
+                        await message.answer(text, reply_markup=menu, parse_mode="HTML")
+                    else:
+                        await message.answer(t(lang, "registration_closed"), reply_markup=menu)
                     return
                 # one phone = one ticket per event: a duplicate gets the existing one
                 existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)

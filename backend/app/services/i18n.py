@@ -123,9 +123,13 @@ _T: dict[str, dict[str, str]] = {
         "en": "• {name} — registration opens at {opens}, the sale starts at {sale}",
     },
     "prestart_no_name_line": {
-        "uz": "⏳ Ro'yhatga olish — {opens} kuni ochiladi.\nSotuv — {sale} dan boshlanadi.",
-        "ru": "⏳ Регистрация — откроется {opens}.\nПродажа — начнётся {sale}.",
-        "en": "⏳ Registration — opens {opens}.\nSale — starts {sale}.",
+        "uz": "⏳ <b>Ro'yhatga olish</b> - {opens_date} kuni telegram kanalda bot "
+              "joylashtirilganda ochiladi.\n<b>Sotuv</b> - {sale_time} {sale_date} kuni "
+              "{sale_time} dan boshlanadi.",
+        "ru": "⏳ <b>Регистрация</b> - откроется {opens_date}, когда бот будет размещён в "
+              "телеграм-канале.\n<b>Продажа</b> - начнётся в {sale_time} {sale_date}.",
+        "en": "⏳ <b>Registration</b> - opens {opens_date}, when the bot is posted in the "
+              "telegram channel.\n<b>Sale</b> - starts at {sale_time} on {sale_date}.",
     },
     "prestart_channel_note": {
         "uz": "Telegram bot @shahar_invest telegram kanaliga yuboriladi.",

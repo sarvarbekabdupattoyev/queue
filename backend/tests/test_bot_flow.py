@@ -236,8 +236,16 @@ async def test_bot_answers_with_prestart_card_before_registration_opens(client):
             assert text is not None
             # deliberately no event name before the sale is announced publicly
             assert "Katta sotuv" not in text
-            assert queue_service.fmt_local(pending[0].registration_starts_at) in text
-            assert queue_service.fmt_local(pending[0].sale_starts_at) in text
+            # date-only for registration, no time — matches the exact requested wording
+            reg_date = pending[0].registration_starts_at.astimezone(
+                queue_service.TASHKENT
+            ).strftime("%d.%m.%Y")
+            sale_time = pending[0].sale_starts_at.astimezone(queue_service.TASHKENT).strftime(
+                "%H:%M"
+            )
+            assert reg_date in text
+            assert sale_time in text
+            assert "<b>" in text  # sent with parse_mode="HTML"
             assert t(lang, "prestart_channel_note") in text
             assert t(lang, "prestart_how") in text
             assert "Bosh ofis" in text
