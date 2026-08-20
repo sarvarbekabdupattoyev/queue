@@ -122,6 +122,16 @@ _T: dict[str, dict[str, str]] = {
         "ru": "• {name} — регистрация откроется {opens}, продажа начнётся {sale}",
         "en": "• {name} — registration opens at {opens}, the sale starts at {sale}",
     },
+    "prestart_no_name_line": {
+        "uz": "⏳ Ro'yhatga olish — {opens} kuni ochiladi.\nSotuv — {sale} dan boshlanadi.",
+        "ru": "⏳ Регистрация — откроется {opens}.\nПродажа — начнётся {sale}.",
+        "en": "⏳ Registration — opens {opens}.\nSale — starts {sale}.",
+    },
+    "prestart_channel_note": {
+        "uz": "Telegram bot @shahar_invest telegram kanaliga yuboriladi.",
+        "ru": "Бот будет размещён в Telegram-канале @shahar_invest.",
+        "en": "The bot will be posted in the @shahar_invest Telegram channel.",
+    },
     "prestart_how": {
         "uz": "📋 Navbat qanday shakllanadi:\nRo'yxat ochilgach botda ro'yxatdan o'tasiz va "
               "4 harfli kod bilan QR olasiz. Sotuv kuni QR qabulxonada skanerlanadi va navbat "

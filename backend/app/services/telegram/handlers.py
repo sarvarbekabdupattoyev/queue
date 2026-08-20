@@ -395,16 +395,33 @@ def build_prestart_text(
     events: list[SaleEvent],
     branches: list[Branch],
 ) -> str:
-    """What the bot answers before registration opens: the sale has not
-    started yet — when registration opens, how the queue will be formed,
-    plus the company's locations and call-center numbers."""
-    blocks: list[str] = [t(lang, "prestart_header")]
+    """What the bot answers before registration opens: when registration
+    opens and when the sale starts (no event name), how people will know
+    registration has opened, locations, how the queue forms, and phones.
+
+    NOTE: with more than one pending event this collapses their opens/sale
+    lines together with no name to tell them apart — acceptable for the
+    current single-event case; revisit if a company ever runs two
+    simultaneously-announced events.
+    """
+    blocks: list[str] = []
     if events:
-        blocks.append("\n".join(_event_line(lang, e) for e in events))
-    blocks.append(t(lang, "prestart_how"))
+        blocks.append(
+            "\n".join(
+                t(
+                    lang,
+                    "prestart_no_name_line",
+                    opens=queue_service.fmt_local(e.registration_starts_at),
+                    sale=queue_service.fmt_local(e.sale_starts_at),
+                )
+                for e in events
+            )
+        )
+    blocks.append(t(lang, "prestart_channel_note"))
     location_lines = _location_lines(lang, company, branches)
     if location_lines:
         blocks.append(t(lang, "info_locations_header") + ":\n" + "\n".join(location_lines))
+    blocks.append(t(lang, "prestart_how"))
     phone_lines = _phone_lines(company)
     if phone_lines:
         blocks.append(t(lang, "info_phones_header") + ":\n" + "\n".join(phone_lines))

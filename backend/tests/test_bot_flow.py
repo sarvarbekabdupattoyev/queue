@@ -234,9 +234,11 @@ async def test_bot_answers_with_prestart_card_before_registration_opens(client):
         for lang in i18n.LANGS:
             text = await _prestart_info_text(db, company_data["id"], pending, lang)
             assert text is not None
-            assert t(lang, "prestart_header") in text
-            assert "Katta sotuv" in text
+            # deliberately no event name before the sale is announced publicly
+            assert "Katta sotuv" not in text
             assert queue_service.fmt_local(pending[0].registration_starts_at) in text
+            assert queue_service.fmt_local(pending[0].sale_starts_at) in text
+            assert t(lang, "prestart_channel_note") in text
             assert t(lang, "prestart_how") in text
             assert "Bosh ofis" in text
             assert "+998 71 200 50 50" in text
