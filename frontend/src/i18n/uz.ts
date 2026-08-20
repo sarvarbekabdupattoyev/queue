@@ -92,12 +92,6 @@ export const uz = {
       },
     ],
   },
-  stats: [
-    { value: 2000, prefix: '', suffix: '+', label: 'ro‘yxat — bir necha daqiqada' },
-    { value: 1, prefix: '<', suffix: ' s', label: 'ekranlardagi yangilanish' },
-    { value: 456976, prefix: '', suffix: '', label: 'kod sig‘imi har tadbirga' },
-    { value: 3, prefix: '', suffix: '', label: 'rol: egasi, menejer, skaner' },
-  ],
   launch: {
     title: '5 daqiqada ishga tushiring',
     sub: 'Texnik bilim shart emas — hammasi brauzerda.',

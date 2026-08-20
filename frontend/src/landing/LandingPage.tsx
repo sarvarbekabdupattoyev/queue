@@ -21,7 +21,6 @@ import {
 } from '../components/icons'
 import { LangSwitcher, useLang } from '../i18n'
 import { BlurText } from './bits/BlurText'
-import { CountUp } from './bits/CountUp'
 import { LiveBoardMock } from './bits/LiveBoardMock'
 import { Marquee } from './bits/Marquee'
 import { QueueDemo } from './bits/QueueDemo'
@@ -219,22 +218,6 @@ export default function LandingPage() {
               )
             })}
           </div>
-        </div>
-      </section>
-
-      {/* ----------------------------------------------------------- stats */}
-      <section className="landing-section" style={{ paddingTop: 0 }}>
-        <div className="landing-container stats-band">
-          {t.stats.map((stat, i) => (
-            <Reveal key={stat.label} delay={i * 0.07}>
-              <div className="stat-cell">
-                <b>
-                  <CountUp to={stat.value} prefix={stat.prefix} suffix={stat.suffix} />
-                </b>
-                <span>{stat.label}</span>
-              </div>
-            </Reveal>
-          ))}
         </div>
       </section>
 

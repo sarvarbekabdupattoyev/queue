@@ -34,7 +34,7 @@ export function LiveBoardMock() {
 
   return (
     <div className="board-mock-wrap" aria-hidden="true">
-      <motion.div className="board-mock" {...float(0, 5)}>
+      <motion.div className="board-mock" style={{ willChange: 'transform' }} {...float(0, 5)}>
         <div className="board-mock-head">
           <span className="live-dot" />
           <span className="board-mock-live">{t.board.live}</span>
@@ -46,9 +46,10 @@ export function LiveBoardMock() {
             <motion.span
               key={call.number}
               className="board-mock-number mono"
-              initial={reduced ? false : { opacity: 0, y: 22, filter: 'blur(6px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={reduced ? undefined : { opacity: 0, y: -22, filter: 'blur(6px)' }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={reduced ? false : { opacity: 0, y: 22 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduced ? undefined : { opacity: 0, y: -22 }}
               transition={{ duration: 0.45, ease: [0.21, 0.6, 0.35, 1] }}
             >
               {call.number}
@@ -68,7 +69,7 @@ export function LiveBoardMock() {
         </div>
       </motion.div>
 
-      <motion.div className="ticket-mock" {...float(1.2, 9)}>
+      <motion.div className="ticket-mock" style={{ willChange: 'transform' }} {...float(1.2, 9)}>
         <div className="ticket-mock-label">{t.board.ticket}</div>
         <div className="ticket-mock-number mono">№KRTA</div>
         <div className="ticket-mock-qr">
@@ -79,7 +80,7 @@ export function LiveBoardMock() {
         <div className="ticket-mock-until">{t.board.scanUntil}</div>
       </motion.div>
 
-      <motion.div className="bot-chip" {...float(2.1, 6)}>
+      <motion.div className="bot-chip" style={{ willChange: 'transform' }} {...float(2.1, 6)}>
         <Logo size={18} />
         <span>{t.board.botChip}</span>
       </motion.div>

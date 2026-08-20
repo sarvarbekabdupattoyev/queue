@@ -94,12 +94,6 @@ export const en: Dict = {
       },
     ],
   },
-  stats: [
-    { value: 2000, prefix: '', suffix: '+', label: 'registrations in minutes' },
-    { value: 1, prefix: '<', suffix: ' s', label: 'screen update latency' },
-    { value: 456976, prefix: '', suffix: '', label: 'codes per event' },
-    { value: 3, prefix: '', suffix: '', label: 'roles: owner, manager, scanner' },
-  ],
   launch: {
     title: 'Launch in 5 minutes',
     sub: 'No technical skills needed — everything happens in the browser.',

@@ -153,8 +153,8 @@
 }
 .marquee::before { left: 0; background: linear-gradient(90deg, var(--bg), transparent); }
 .marquee::after { right: 0; background: linear-gradient(-90deg, var(--bg), transparent); }
-.marquee-track { display: flex; width: max-content; animation: marquee-scroll linear infinite; }
-.marquee-group { display: flex; align-items: center; gap: 14px; padding-right: 14px; }
+.marquee-track { display: flex; width: max-content; animation: marquee-scroll linear infinite; will-change: transform; }
+.marquee-group { display: flex; align-items: center; gap: 14px; padding-right: 14px; flex: none; }
 .marquee-item {
   display: inline-flex; align-items: center; gap: 10px; white-space: nowrap;
   padding: 10px 20px; border-radius: 999px; border: 1px solid var(--line);
@@ -179,6 +179,7 @@
 .how-card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl);
   padding: 22px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
+  height: 100%; box-sizing: border-box;
 }
 .how-card::before {
   counter-increment: step; content: '0' counter(step);
@@ -228,6 +229,7 @@
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl);
   padding: 24px; box-shadow: var(--shadow-sm);
   transition: transform 0.18s ease, border-color 0.18s ease;
+  height: 100%; box-sizing: border-box;
 }
 .spotlight-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent-text) 34%, var(--line)); }
 .spotlight-card::before {
@@ -243,13 +245,6 @@
 }
 .spotlight-card h3 { font-size: 18.5px; margin-bottom: 8px; }
 .spotlight-card p { color: var(--dim); font-size: 13.5px; line-height: 1.62; }
-
-/* stats */
-.stats-band { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-@media (max-width: 860px) { .stats-band { grid-template-columns: repeat(2, 1fr); } }
-.stat-cell { text-align: center; padding: 26px 12px; border-radius: var(--r-xl); background: var(--surface); border: 1px solid var(--line); }
-.stat-cell b { display: block; font: 400 clamp(34px, 4vw, 48px)/1.1 var(--display); color: var(--accent-text); font-variant-numeric: tabular-nums; }
-.stat-cell span { display: block; margin-top: 6px; color: var(--dim); font-size: 13px; }
 
 /* launch steps */
 .launch-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }

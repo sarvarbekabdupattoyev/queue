@@ -94,12 +94,6 @@ export const ru: Dict = {
       },
     ],
   },
-  stats: [
-    { value: 2000, prefix: '', suffix: '+', label: 'регистраций за минуты' },
-    { value: 1, prefix: '<', suffix: ' с', label: 'обновление экранов' },
-    { value: 456976, prefix: '', suffix: '', label: 'кодов на мероприятие' },
-    { value: 3, prefix: '', suffix: '', label: 'роли: владелец, менеджер, сканер' },
-  ],
   launch: {
     title: 'Запуск за 5 минут',
     sub: 'Технические навыки не нужны — всё в браузере.',
