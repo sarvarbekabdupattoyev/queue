@@ -74,26 +74,13 @@ class SaleEvent(Base):
     def branch_ids(self) -> list[int]:
         return [b.id for b in self.branches]
 
-    def _registration_started(self, at: datetime) -> bool:
-        """Whether ``registration_starts_at`` has passed.
-
-        TEMPORARY (requested 2026-08-20): hardcoded to True so registration
-        is open immediately for demo purposes, while registration_starts_at
-        itself — and everywhere it's displayed: dashboard, phase badges,
-        info cards — stays at its real future value. phase(),
-        registration_open(), and registration_pending() all derive from
-        this one place now, so they can never disagree with each other.
-        Delete "True or " to restore the real gate everywhere at once.
-        """
-        return True or at >= self.registration_starts_at
-
     def phase(self, at: datetime | None = None) -> EventPhase:
         at = at or now_utc()
         if not self.is_active:
             return EventPhase.CLOSED
         if self.sale_ended_at is not None:
             return EventPhase.ENDED
-        if not self._registration_started(at):
+        if at < self.registration_starts_at:
             return EventPhase.ANNOUNCED
         if at < self.starts_at:
             return EventPhase.REGISTRATION
@@ -110,18 +97,24 @@ class SaleEvent(Base):
         return (
             self.is_active
             and self.sale_ended_at is None
-            and not self._registration_started(at)
+            and at < self.registration_starts_at
         )
 
     def registration_open(self, at: datetime | None = None) -> bool:
         """The bot hands out codes from ``registration_starts_at`` for as
         long as the event is active and the sale has not ended — clients who
-        end up scanning late just join the late group."""
+        end up scanning late just join the late group.
+
+        TEMPORARY (requested 2026-08-20): the registration_starts_at gate is
+        bypassed below so registration works immediately for demo purposes,
+        while the field itself (and everything that displays it) stays at
+        its real future value. Delete "True or " to restore the real gate.
+        """
         at = at or now_utc()
         return (
             self.is_active
             and self.sale_ended_at is None
-            and self._registration_started(at)
+            and (True or at >= self.registration_starts_at)
         )
 
     def queue_started(self, at: datetime | None = None) -> bool:
