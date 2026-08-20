@@ -453,10 +453,19 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
         if claimed:
             lang = await _ticket_lang(db, event, ticket)
             if not event.queue_started(now):
-                # the sale has not started: the final order is not announced yet
+                # TEMPORARY (requested 2026-08-20): reveal the check-in position
+                # immediately instead of waiting for sale start, for pre-sale-day
+                # testing. Remove this position lookup and the {position}
+                # placeholders in i18n.py's ntf_checkin_prequeue /
+                # ntf_checkin_late_prequeue (uz) when told to revert.
                 key = "ntf_checkin_prequeue" if on_time else "ntf_checkin_late_prequeue"
+                position = await position_of(db, ticket)
                 message = i18n.t(
-                    lang, key, number=ticket.number, time=fmt_local(event.sale_starts_at)
+                    lang,
+                    key,
+                    number=ticket.number,
+                    position=position,
+                    time=fmt_local(event.sale_starts_at),
                 )
             else:
                 position = await position_of(db, ticket)
