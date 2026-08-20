@@ -160,7 +160,7 @@
   padding: 10px 20px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--surface); color: var(--dim); font-size: 13.5px; font-weight: 500;
 }
-@keyframes marquee-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes marquee-scroll { from { transform: translateX(0); } to { transform: translateX(-25%); } }
 @media (prefers-reduced-motion: reduce) { .marquee-track { animation: none; } }
 
 /* ---------------- sections ---------------- */
