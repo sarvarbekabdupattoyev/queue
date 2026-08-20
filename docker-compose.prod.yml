@@ -15,6 +15,13 @@ services:
     # in the low gigabytes for years, so the whole dataset lives in memory;
     # jit=off because pure-OLTP micro-queries lose more to JIT warm-up than
     # they gain; wal caps keep the small NVMe from filling with WAL.
+    #
+    # Bound to loopback only, for admin access via SSH tunnel — never 0.0.0.0
+    # (Docker's iptables rules for published ports bypass UFW entirely, so
+    # "only frontend publishes ports" only holds if every other bind targets
+    # 127.0.0.1 specifically, not the public interface).
+    ports:
+      - "127.0.0.1:5432:5432"
     command: >
       postgres
       -c max_connections=200
