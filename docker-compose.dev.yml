@@ -1,0 +1,68 @@
+# SmartNavbat — dev/staging stack override. Runs alongside the production
+# stack on the same host under a separate compose project ("smartnavbat-dev"),
+# so container names, network, and volumes never collide with prod.
+# Deliberately modest resource ceilings, since this shares the box with prod.
+
+name: smartnavbat-dev
+
+services:
+  postgres:
+    ports: []
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2g }
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=512MB
+      -c log_min_duration_statement=250
+
+  redis:
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+      --appendonly yes
+      --appendfsync everysec
+      --save ""
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 640m }
+
+  api:
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 1g }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 40s
+
+  bot:
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 512m }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/healthz', timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    ports: []
+    volumes:
+      - ./deploy/nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - default
+      - prod_edge
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128m }
+
+networks:
+  prod_edge:
+    external: true
+    name: smartnavbat_default
