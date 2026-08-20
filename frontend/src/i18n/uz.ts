@@ -56,6 +56,11 @@ export const uz = {
   fair: {
     title: 'Tartib — ro‘yxat vaqti bo‘yicha. Kelish tartibi emas.',
     sub: 'Tungi navbatlar va tirbandlik tugaydi: ertalab kim birinchi kelgani emas, botda kim birinchi yozilgani muhim. Skanerlanmaganlar navbatga kirmaydi.',
+    facts: [
+      'Tasodifiy 4 harfli kod — 456 976 xil kombinatsiya, oldindan taxmin qilib yoki sotib bo‘lmaydi.',
+      'Faqat skanerlangan chiptalar yakuniy navbatga kiradi — qolganlari hisobga olinmaydi.',
+      'Kechikkanlar chetlanmaydi: ular avtomatik kun oxiri guruhiga o‘tadi.',
+    ],
     phases: ['1 · Botda ro‘yxat', '2 · Ofisga kelish', '3 · Yakuniy navbat'],
     registered: 'yozildi',
     arrived: 'keldi',

@@ -188,6 +188,14 @@ export default function LandingPage() {
           <Reveal>
             <h2 className="section-title">{t.fair.title}</h2>
             <p className="section-sub">{t.fair.sub}</p>
+            <ul className="fair-facts">
+              {t.fair.facts.map((fact) => (
+                <li key={fact}>
+                  <IconCheck size={15} />
+                  {fact}
+                </li>
+              ))}
+            </ul>
           </Reveal>
           <Reveal delay={0.12}>
             <QueueDemo />

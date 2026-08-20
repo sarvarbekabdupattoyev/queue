@@ -58,6 +58,11 @@ export const en: Dict = {
   fair: {
     title: 'Order by registration time. Not by who ran faster.',
     sub: 'No overnight lines, no crowd at the door: what matters is who registered first in the bot — not who arrived first in the morning. Unscanned tickets never enter the queue.',
+    facts: [
+      'A random 4-letter code — 456,976 possible combinations, impossible to predict or buy.',
+      'Only scanned tickets enter the final queue — everything else is excluded.',
+      "Latecomers aren't turned away: they're moved to the automatic end-of-day group.",
+    ],
     phases: ['1 · Bot registration', '2 · Arrival at the office', '3 · Final queue'],
     registered: 'registered',
     arrived: 'arrived',
