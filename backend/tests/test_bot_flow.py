@@ -13,6 +13,9 @@ from app.models import BotUser, Company, SaleEvent, TicketStatus
 from app.services import i18n, notify, queue_service, ticket_service
 from app.services.i18n import _T, t
 from app.services.telegram.handlers import (
+    _open_events,
+    _pending_events,
+    _prestart_info_text,
     _save_lang,
     _stored_lang,
     build_info_text,
@@ -195,3 +198,45 @@ async def test_company_info_text_lists_everything(client):
             assert "Bosh ofis" in text
             assert "+998 71 200 50 50" in text
             assert t(lang, "info_phones_header") in text
+
+
+async def test_bot_answers_with_prestart_card_before_registration_opens(client):
+    """Before ``registration_starts_at`` the bot offers nothing to register
+    for; /start answers with the card: the sale has not started + when
+    registration opens + how the queue forms + locations + call-center
+    numbers."""
+    token = (await register_owner(client))["access_token"]
+    company_data = await create_company(client, token)
+    await client.post(
+        "/api/company/phones",
+        json={"phone": "+998712005050", "label": "Call-markaz"},
+        headers=auth(token),
+    )
+    await client.post(
+        "/api/company/locations",
+        json={"name": "Bosh ofis", "address": "Toshkent, Yunusobod 4-mavze"},
+        headers=auth(token),
+    )
+    event_resp = await client.post(
+        "/api/events",
+        json={
+            "name": "Katta sotuv",
+            **event_times(reg_min=90, starts_min=120, checkin_min=150, sale_min=180),
+        },
+        headers=auth(token),
+    )
+    assert event_resp.status_code == 201, event_resp.text
+
+    async with SessionFactory() as db:
+        assert await _open_events(db, company_data["id"]) == []
+        pending = await _pending_events(db, company_data["id"])
+        assert [e.name for e in pending] == ["Katta sotuv"]
+        for lang in i18n.LANGS:
+            text = await _prestart_info_text(db, company_data["id"], pending, lang)
+            assert text is not None
+            assert t(lang, "prestart_header") in text
+            assert "Katta sotuv" in text
+            assert queue_service.fmt_local(pending[0].registration_starts_at) in text
+            assert t(lang, "prestart_how") in text
+            assert "Bosh ofis" in text
+            assert "+998 71 200 50 50" in text

@@ -55,7 +55,7 @@ async def _event_out(db: DbSession, event: SaleEvent) -> EventOut:
     return EventOut(
         id=event.id,
         name=event.name,
-        registration_until=event.registration_until,
+        registration_starts_at=event.registration_starts_at,
         starts_at=event.starts_at,
         checkin_until=event.checkin_until,
         sale_starts_at=event.sale_starts_at,
@@ -111,7 +111,7 @@ async def create_event(payload: EventCreate, db: DbSession, company: OwnCompany)
     event = SaleEvent(
         company_id=company.id,
         name=payload.name.strip(),
-        registration_until=payload.registration_until,
+        registration_starts_at=payload.registration_starts_at,
         starts_at=payload.starts_at,
         checkin_until=payload.checkin_until,
         sale_starts_at=payload.sale_starts_at,
@@ -132,7 +132,7 @@ async def get_event(db: DbSession, event: CompanyEvent) -> EventOut:
 async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent) -> EventOut:
     if payload.name is not None:
         event.name = payload.name.strip()
-    for field in ("registration_until", "starts_at", "checkin_until", "sale_starts_at"):
+    for field in ("registration_starts_at", "starts_at", "checkin_until", "sale_starts_at"):
         value = getattr(payload, field)
         if value is None:
             continue
@@ -141,7 +141,7 @@ async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent)
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vaqt mintaqasi ko'rsatilmagan")
         setattr(event, field, value)
     if not check_period_order(
-        event.registration_until, event.starts_at, event.checkin_until, event.sale_starts_at
+        event.registration_starts_at, event.starts_at, event.checkin_until, event.sale_starts_at
     ):
         await db.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, PERIOD_ORDER_ERROR)

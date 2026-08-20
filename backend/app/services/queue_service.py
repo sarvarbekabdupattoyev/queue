@@ -214,7 +214,7 @@ def _event_info(event: SaleEvent, company: Company | None) -> dict[str, Any]:
         "id": event.id,
         "name": event.name,
         "phase": event.phase().value,
-        "registration_until": event.registration_until.isoformat(),
+        "registration_starts_at": event.registration_starts_at.isoformat(),
         "starts_at": event.starts_at.isoformat(),
         "checkin_until": event.checkin_until.isoformat(),
         "sale_starts_at": event.sale_starts_at.isoformat(),
@@ -388,9 +388,9 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
     event_id = event.id
 
     if ticket.status == TicketStatus.REGISTERED:
-        # on time = registered inside the registration period AND scanned
-        # inside the QR window; everything else joins the end-of-day group
-        on_time = event.on_time_checkin(ticket.registered_at, now)
+        # on time = scanned inside the QR window; later scans join the
+        # end-of-day group (registration itself is gated at creation time)
+        on_time = event.on_time_checkin(now)
         if on_time:
             values: dict[str, Any] = {"late": False, "queue_order": _epoch_us(ticket.registered_at)}
         else:

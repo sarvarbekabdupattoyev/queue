@@ -72,13 +72,17 @@ git checkout dev  && git push origin dev
 
 ## Domain invariants (never break these)
 
-- Three event periods: registration (→ `registration_until`), QR scanning
-  (`starts_at` → `checkin_until`), sale (from `sale_starts_at`, no fixed
-  end). Registration and scanning stay open past their period until the
-  sale ends — latecomers just join the end-of-day group.
+- Three event periods: registration (opens at `registration_starts_at`),
+  QR scanning (`starts_at` → `checkin_until`), sale (from `sale_starts_at`,
+  no fixed end). Before `registration_starts_at` the bot registers NOBODY —
+  it answers with the info card instead (sale not started + when
+  registration opens + how the queue forms + locations + call-center
+  numbers). Once open, registration and scanning stay open until the event
+  is deactivated or the sale ends — latecomers just join the end-of-day
+  group.
 - Queue order = `registered_at` (bot registration time) among CHECKED_IN
-  tickets; late registrations, late check-ins, skip-returns and staff
-  walk-ins go to the end-of-day group
+  tickets; late check-ins (scans after `checkin_until`), skip-returns and
+  staff walk-ins go to the end-of-day group
   (`queue_order = LATE_ORDER_BASE + event.late_seq`). Ticket "numbers" are
   random 4-letter uppercase codes, unique per event — never sequential,
   never reused. QR codes are single-use: a scanned/staff-added ticket can

@@ -16,9 +16,11 @@ def _display_code() -> str:
 class SaleEvent(Base):
     """A sale day, run in three clearly separated periods:
 
-    1. registration (… → ``registration_until``): the bot registers clients
-       and hands out QR + code. Registration never actually closes until the
-       sale ends — clients who register later simply join the late group.
+    1. registration (``registration_starts_at`` → …): the bot registers
+       clients and hands out QR + code from this moment on. Before it the
+       bot only shows an info card (sale not started, how the queue forms,
+       locations, contact phones). Once open, registration never closes
+       until the event is deactivated or the sale ends.
     2. QR scanning (``starts_at`` → ``checkin_until``): reception scans QR
        codes. Scans after ``checkin_until`` are still accepted but go to the
        late (end-of-day) group.
@@ -34,9 +36,9 @@ class SaleEvent(Base):
         ForeignKey("companies.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(120))
-    # end of the ON-TIME registration period: clients registered after this
-    # moment get a QR too, but land in the late group once scanned
-    registration_until: Mapped[datetime] = mapped_column(UTCDateTime)
+    # registration OPENS here; before it the bot refuses to register anyone
+    # and answers with the info card instead
+    registration_starts_at: Mapped[datetime] = mapped_column(UTCDateTime)
     # QR scanning period (start is informational; the end is the on-time cut)
     starts_at: Mapped[datetime] = mapped_column(UTCDateTime)
     checkin_until: Mapped[datetime] = mapped_column(UTCDateTime)
@@ -78,7 +80,9 @@ class SaleEvent(Base):
             return EventPhase.CLOSED
         if self.sale_ended_at is not None:
             return EventPhase.ENDED
-        if at < self.registration_until:
+        if at < self.registration_starts_at:
+            return EventPhase.ANNOUNCED
+        if at < self.starts_at:
             return EventPhase.REGISTRATION
         if at < self.sale_starts_at:
             return EventPhase.CHECKIN
@@ -86,10 +90,26 @@ class SaleEvent(Base):
             return EventPhase.HOLD
         return EventPhase.QUEUE
 
+    def registration_pending(self, at: datetime | None = None) -> bool:
+        """Announced but not open yet: the bot must not register anyone —
+        it answers with the info card (sale not started) instead."""
+        at = at or now_utc()
+        return (
+            self.is_active
+            and self.sale_ended_at is None
+            and at < self.registration_starts_at
+        )
+
     def registration_open(self, at: datetime | None = None) -> bool:
-        """The bot hands out codes for as long as the event is active and the
-        sale has not ended — late registrants just join the late group."""
-        return self.is_active and self.sale_ended_at is None
+        """The bot hands out codes from ``registration_starts_at`` for as
+        long as the event is active and the sale has not ended — clients who
+        end up scanning late just join the late group."""
+        at = at or now_utc()
+        return (
+            self.is_active
+            and self.sale_ended_at is None
+            and at >= self.registration_starts_at
+        )
 
     def queue_started(self, at: datetime | None = None) -> bool:
         """The sale (calling period) has begun and is not over. A sale on
@@ -97,9 +117,9 @@ class SaleEvent(Base):
         at = at or now_utc()
         return self.is_active and self.sale_ended_at is None and at >= self.sale_starts_at
 
-    def on_time_checkin(self, ticket_registered_at: datetime, at: datetime | None = None) -> bool:
-        """A scan joins the main queue only when the client registered inside
-        the registration period AND the scan lands inside the QR window;
-        everything else goes to the late (end-of-day) group."""
+    def on_time_checkin(self, at: datetime | None = None) -> bool:
+        """A scan joins the main queue only when it lands inside the QR
+        window; later scans (like skip-returns and staff walk-ins) go to the
+        late (end-of-day) group."""
         at = at or now_utc()
-        return ticket_registered_at <= self.registration_until and at < self.checkin_until
+        return at < self.checkin_until

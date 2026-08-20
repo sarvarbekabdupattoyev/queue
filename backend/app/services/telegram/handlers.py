@@ -6,6 +6,11 @@ F.I.Sh. in one line → phone via the contact button ONLY (typed numbers are
 rejected; one phone = one ticket, duplicates get their existing ticket back)
 → ticket with a random 4-letter uppercase code + QR photo.
 
+Registration is gated by ``event.registration_starts_at``: before that
+moment the bot registers nobody — /start answers with a "sale has not
+started" card instead (when registration opens, how the queue will form,
+company locations and call-center numbers).
+
 The persistent menu always carries the company-info button (name, logo,
 locations, upcoming sale dates, contact phones) and a language switcher.
 
@@ -171,7 +176,8 @@ async def _menu_lang(session: AsyncSession, company_id: int, chat_id: int) -> st
 
 # ---------------------------------------------------------------- queries ---
 
-async def _open_events(session: AsyncSession, company_id: int) -> list[SaleEvent]:
+async def _live_events(session: AsyncSession, company_id: int) -> list[SaleEvent]:
+    """Active events whose sale has not ended — announced and open alike."""
     events = (
         await session.scalars(
             select(SaleEvent)
@@ -179,8 +185,19 @@ async def _open_events(session: AsyncSession, company_id: int) -> list[SaleEvent
             .order_by(SaleEvent.starts_at)
         )
     ).all()
+    return [e for e in events if e.sale_ended_at is None]
+
+
+async def _open_events(session: AsyncSession, company_id: int) -> list[SaleEvent]:
+    """Events the bot may register clients for right now."""
     now = now_utc()
-    return [e for e in events if e.registration_open(now)]
+    return [e for e in await _live_events(session, company_id) if e.registration_open(now)]
+
+
+async def _pending_events(session: AsyncSession, company_id: int) -> list[SaleEvent]:
+    """Announced events whose registration has not opened yet."""
+    now = now_utc()
+    return [e for e in await _live_events(session, company_id) if e.registration_pending(now)]
 
 
 async def _my_tickets(session: AsyncSession, company_id: int, chat_id: int) -> list[Ticket]:
@@ -297,6 +314,49 @@ async def _status_text(session: AsyncSession, ticket: Ticket, lang: str) -> str:
     return t(lang, "status_summary", now_line=now_line, waiting=waiting_total, mine=mine)
 
 
+def _event_line(lang: str, event: SaleEvent) -> str:
+    """One "upcoming sale" line; announced events lead with when the
+    registration opens instead of the scanning window."""
+    if event.registration_pending():
+        return t(
+            lang,
+            "prestart_event_line",
+            name=event.name,
+            opens=queue_service.fmt_local(event.registration_starts_at),
+            sale=queue_service.fmt_local(event.sale_starts_at),
+        )
+    return t(
+        lang,
+        "info_event_line",
+        name=event.name,
+        starts=queue_service.fmt_local(event.starts_at),
+        deadline=queue_service.fmt_local(event.checkin_until),
+    )
+
+
+def _location_lines(lang: str, company: Company, branches: list[Branch]) -> list[str]:
+    """Company locations, or branch addresses as fallback."""
+    lines = [
+        "• " + ", ".join(part for part in (loc.name, loc.address) if part)
+        + (f" ({t(lang, 'info_map_link')}: {loc.map_url})" if loc.map_url else "")
+        for loc in company.locations
+    ]
+    if not lines:
+        lines = [
+            "• " + ", ".join(part for part in (b.name, b.address) if part)
+            for b in branches
+            if b.address
+        ]
+    return lines
+
+
+def _phone_lines(company: Company) -> list[str]:
+    return [
+        f"• {pretty_phone(p.phone)}" + (f" — {p.label}" if p.label else "")
+        for p in company.phones
+    ]
+
+
 def build_info_text(
     lang: str,
     company: Company,
@@ -307,39 +367,58 @@ def build_info_text(
     (company locations, or branch addresses as fallback) and phones."""
     blocks: list[str] = [f"🏢 {company.name}"]
     if events:
-        lines = [
-            t(
-                lang,
-                "info_event_line",
-                name=e.name,
-                starts=queue_service.fmt_local(e.starts_at),
-                deadline=queue_service.fmt_local(e.checkin_until),
-            )
-            for e in events
-        ]
+        lines = [_event_line(lang, e) for e in events]
         blocks.append(t(lang, "info_events_header") + ":\n" + "\n".join(lines))
-    location_lines = [
-        "• " + ", ".join(part for part in (loc.name, loc.address) if part)
-        + (f" ({t(lang, 'info_map_link')}: {loc.map_url})" if loc.map_url else "")
-        for loc in company.locations
-    ]
-    if not location_lines:
-        location_lines = [
-            "• " + ", ".join(part for part in (b.name, b.address) if part)
-            for b in branches
-            if b.address
-        ]
+    location_lines = _location_lines(lang, company, branches)
     if location_lines:
         blocks.append(t(lang, "info_locations_header") + ":\n" + "\n".join(location_lines))
-    if company.phones:
-        phone_lines = [
-            f"• {pretty_phone(p.phone)}" + (f" — {p.label}" if p.label else "")
-            for p in company.phones
-        ]
+    phone_lines = _phone_lines(company)
+    if phone_lines:
         blocks.append(t(lang, "info_phones_header") + ":\n" + "\n".join(phone_lines))
     if len(blocks) == 1:
         blocks.append(t(lang, "info_no_details"))
     return "\n\n".join(blocks)
+
+
+def build_prestart_text(
+    lang: str,
+    company: Company,
+    events: list[SaleEvent],
+    branches: list[Branch],
+) -> str:
+    """What the bot answers before registration opens: the sale has not
+    started yet — when registration opens, how the queue will be formed,
+    plus the company's locations and call-center numbers."""
+    blocks: list[str] = [t(lang, "prestart_header")]
+    if events:
+        blocks.append("\n".join(_event_line(lang, e) for e in events))
+    blocks.append(t(lang, "prestart_how"))
+    location_lines = _location_lines(lang, company, branches)
+    if location_lines:
+        blocks.append(t(lang, "info_locations_header") + ":\n" + "\n".join(location_lines))
+    phone_lines = _phone_lines(company)
+    if phone_lines:
+        blocks.append(t(lang, "info_phones_header") + ":\n" + "\n".join(phone_lines))
+    return "\n\n".join(blocks)
+
+
+async def _prestart_info_text(
+    session: AsyncSession, company_id: int, events: list[SaleEvent], lang: str
+) -> str | None:
+    """Load the company card data and render the pre-registration answer."""
+    company = await session.scalar(
+        select(Company)
+        .where(Company.id == company_id)
+        .options(selectinload(Company.phones), selectinload(Company.locations))
+    )
+    if company is None:
+        return None
+    branches = (
+        await session.scalars(
+            select(Branch).where(Branch.company_id == company_id).order_by(Branch.id)
+        )
+    ).all()
+    return build_prestart_text(lang, company, events, list(branches))
 
 
 # ----------------------------------------------------------------- handlers ---
@@ -398,9 +477,17 @@ async def _start_flow(
             await _send_ticket(message, session, ticket, lang)
         return
     if not open_without_ticket:
-        await message.answer(
-            t(lang, "no_open_events"), reply_markup=main_menu(lang, registered=bool(tickets))
-        )
+        # nothing open to register for — announced events answer with the
+        # "sale has not started" card (opening time, queue rules, locations,
+        # call-center numbers) instead of a bare refusal
+        pending = await _pending_events(session, company_id)
+        menu = main_menu(lang, registered=bool(tickets))
+        if pending:
+            text = await _prestart_info_text(session, company_id, pending, lang)
+            if text is not None:
+                await message.answer(text, reply_markup=menu)
+                return
+        await message.answer(t(lang, "no_open_events"), reply_markup=menu)
         return
     if len(open_without_ticket) == 1:
         event = open_without_ticket[0]
@@ -466,7 +553,14 @@ async def choose_event(callback: CallbackQuery, state: FSMContext, company_id: i
     async with SessionFactory() as session:
         event = await session.get(SaleEvent, event_id)
         if event is None or event.company_id != company_id or not event.registration_open():
-            await callback.answer(t(lang, "event_closed_alert"), show_alert=True)
+            key = (
+                "event_not_open_alert"
+                if event is not None
+                and event.company_id == company_id
+                and event.registration_pending()
+                else "event_closed_alert"
+            )
+            await callback.answer(t(lang, key), show_alert=True)
             return
         await callback.answer()
         await _ask_branch_or_name(callback.message, state, event, lang)
@@ -484,7 +578,14 @@ async def choose_branch(callback: CallbackQuery, state: FSMContext, company_id: 
             or not event.registration_open()
             or branch_id not in event.branch_ids()
         ):
-            await callback.answer(t(lang, "branch_closed_alert"), show_alert=True)
+            key = (
+                "event_not_open_alert"
+                if event is not None
+                and event.company_id == company_id
+                and event.registration_pending()
+                else "branch_closed_alert"
+            )
+            await callback.answer(t(lang, key), show_alert=True)
             return
         branch_name = next(b.name for b in event.branches if b.id == branch_id)
     await callback.answer()
@@ -565,7 +666,9 @@ async def cmd_info(message: Message, company_id: int) -> None:
         )
         if company is None:
             return
-        events = await _open_events(session, company_id)
+        # announced events belong on the card too — before registration opens
+        # is exactly when clients ask "when?"
+        events = await _live_events(session, company_id)
         branches = (
             await session.scalars(
                 select(Branch).where(Branch.company_id == company_id).order_by(Branch.id)
@@ -631,7 +734,12 @@ async def _finish_registration(
         if event is None or not event.registration_open():
             await state.clear()
             menu = await _menu_for(session, company_id, message.chat.id, lang)
-            await message.answer(t(lang, "registration_closed"), reply_markup=menu)
+            # the owner can move the opening time while a client is mid-flow:
+            # answer with the full "sale has not started" card, not "closed"
+            text = None
+            if event is not None and event.registration_pending():
+                text = await _prestart_info_text(session, company_id, [event], lang)
+            await message.answer(text or t(lang, "registration_closed"), reply_markup=menu)
             return
         # one phone = one ticket per event: a duplicate gets the existing one
         existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
@@ -664,9 +772,9 @@ async def _finish_registration(
             return
         await state.clear()
         queue_service.schedule_event_broadcast(event.id)
-        # a registration after the on-time period still gets a QR, but the
+        # a registration after the scanning window still gets a QR, but the
         # client is told up front they will join the end-of-day queue
-        late_born = ticket.registered_at > event.registration_until
+        late_born = ticket.registered_at >= event.checkin_until
         ok_key = "registered_ok_late" if late_born else "registered_ok"
         await message.answer(t(lang, ok_key), reply_markup=main_menu(lang))
         await _send_ticket(message, session, ticket, lang)

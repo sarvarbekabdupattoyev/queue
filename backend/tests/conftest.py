@@ -74,14 +74,15 @@ async def create_company(client: AsyncClient, token: str, name: str = "Bahor Cit
 
 
 def event_times(
-    *, reg_min: int = 30, starts_min: int = 30, checkin_min: int = 60, sale_min: int = 90
+    *, reg_min: int = -30, starts_min: int = 30, checkin_min: int = 60, sale_min: int = 90
 ) -> dict:
-    """The three periods of an event, as minute offsets from now: on-time
-    registration ends, QR scanning runs, the sale starts. Defaults keep
-    registration AND scanning open right now, sale not yet started."""
+    """The three periods of an event, as minute offsets from now:
+    registration OPENS, QR scanning runs, the sale starts. Defaults keep
+    registration open right now (it opened ``reg_min`` minutes ago) and the
+    sale not yet started."""
     now = now_utc()
     return {
-        "registration_until": (now + timedelta(minutes=reg_min)).isoformat(),
+        "registration_starts_at": (now + timedelta(minutes=reg_min)).isoformat(),
         "starts_at": (now + timedelta(minutes=starts_min)).isoformat(),
         "checkin_until": (now + timedelta(minutes=checkin_min)).isoformat(),
         "sale_starts_at": (now + timedelta(minutes=sale_min)).isoformat(),
@@ -92,7 +93,7 @@ def started_sale_times() -> dict:
     """Every period in the past: scanning window over, sale running."""
     now = now_utc()
     return {
-        "registration_until": (now - timedelta(hours=3)).isoformat(),
+        "registration_starts_at": (now - timedelta(hours=3)).isoformat(),
         "starts_at": (now - timedelta(hours=3)).isoformat(),
         "checkin_until": (now - timedelta(minutes=2)).isoformat(),
         "sale_starts_at": (now - timedelta(minutes=1)).isoformat(),

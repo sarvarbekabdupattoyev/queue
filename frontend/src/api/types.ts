@@ -9,7 +9,14 @@ export type TicketStatus =
   | 'skipped'
   | 'cancelled'
 
-export type EventPhase = 'closed' | 'registration' | 'checkin' | 'queue' | 'hold' | 'ended'
+export type EventPhase =
+  | 'closed'
+  | 'announced'
+  | 'registration'
+  | 'checkin'
+  | 'queue'
+  | 'hold'
+  | 'ended'
 
 export interface User {
   id: number
@@ -88,7 +95,7 @@ export interface EventBranch {
 export interface SaleEvent {
   id: number
   name: string
-  registration_until: string
+  registration_starts_at: string
   starts_at: string
   checkin_until: string
   sale_starts_at: string
@@ -174,7 +181,7 @@ export interface PublicState {
     id: number
     name: string
     phase: EventPhase
-    registration_until: string
+    registration_starts_at: string
     starts_at: string
     checkin_until: string
     sale_starts_at: string

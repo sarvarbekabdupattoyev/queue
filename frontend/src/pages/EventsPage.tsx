@@ -15,6 +15,7 @@ import { ActionForm, EmptyState, Field, Modal, Spinner, useConfirm, useToast } f
 import { formatDateTime, isoToTashkentParts, tashkentPartsToIso } from '../lib/format'
 
 export const PHASE_LABEL: Record<EventPhase, { text: string; tone: string }> = {
+  announced: { text: 'Ro‘yxat boshlanmagan', tone: 'dim' },
   registration: { text: 'Ro‘yxat davri', tone: 'blue' },
   checkin: { text: 'QR skanerlash davri', tone: 'amber' },
   queue: { text: 'Sotuv davom etmoqda', tone: 'teal' },
@@ -208,7 +209,7 @@ export default function EventsPage() {
   })
 
   const openEdit = (event: SaleEvent) => {
-    const reg = isoToTashkentParts(event.registration_until)
+    const reg = isoToTashkentParts(event.registration_starts_at)
     const starts = isoToTashkentParts(event.starts_at)
     const checkin = isoToTashkentParts(event.checkin_until)
     const sale = isoToTashkentParts(event.sale_starts_at)
@@ -250,9 +251,9 @@ export default function EventsPage() {
     <>
       <div className="page-actions">
         <span className="hint">
-          Uch davr: botda ro‘yxat → QR skanerlash → sotuv. Ro‘yxat va skanerlash o‘z davridan
-          keyin ham yopilmaydi — kechikkanlar navbat oxiriga qo‘shiladi. Yangi tadbir —
-          yuqoridagi tugma orqali.
+          Uch davr: botda ro‘yxat → QR skanerlash → sotuv. Ro‘yxat belgilangan vaqtda ochiladi —
+          undan oldin bot faqat ma’lumot beradi; ochilgach sotuv yakunlanguncha yopilmaydi,
+          kechikkanlar navbat oxiriga qo‘shiladi. Yangi tadbir — yuqoridagi tugma orqali.
         </span>
       </div>
 
@@ -404,7 +405,7 @@ export default function EventsPage() {
             onSubmit={async () => {
               const payload = {
                 name: form.name,
-                registration_until: tashkentPartsToIso(form.reg_date, form.reg_time),
+                registration_starts_at: tashkentPartsToIso(form.reg_date, form.reg_time),
                 starts_at: tashkentPartsToIso(form.starts_date, form.starts_time),
                 checkin_until: tashkentPartsToIso(form.checkin_date, form.checkin_time),
                 sale_starts_at: tashkentPartsToIso(form.sale_date, form.sale_time),
@@ -431,11 +432,13 @@ export default function EventsPage() {
 
                 <div className="card-title" style={{ marginTop: 4 }}>1-davr · Ro‘yxatdan o‘tish</div>
                 <p className="hint" style={{ marginTop: -4 }}>
-                  Mijozlar botda ro‘yxatdan o‘tib QR va kod oladi. Bu vaqtdan keyin ham
-                  ro‘yxat yopilmaydi — lekin keyin yozilganlar navbat oxiriga qo‘shiladi.
+                  Ro‘yxat shu vaqtda ochiladi: mijozlar botda ro‘yxatdan o‘tib QR va kod oladi.
+                  Undan oldin bot sotuv boshlanmaganini aytadi va navbat tartibi, manzillar
+                  hamda aloqa raqamlari haqida ma’lumot beradi. Ochilgan ro‘yxat sotuv
+                  yakunlanguncha yopilmaydi.
                 </p>
                 <TashkentTimeField
-                  label="Ro‘yxat davri tugashi"
+                  label="Ro‘yxat boshlanishi"
                   date={form.reg_date}
                   time={form.reg_time}
                   onDate={(v) =>

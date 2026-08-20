@@ -26,24 +26,24 @@ class EventBranchOut(BaseModel):
 
 
 PERIOD_ORDER_ERROR = (
-    "Davrlar tartibi: ro'yxat tugashi ≤ skanerlash boshlanishi < skanerlash "
+    "Davrlar tartibi: ro'yxat boshlanishi ≤ skanerlash boshlanishi < skanerlash "
     "tugashi ≤ sotuv boshlanishi"
 )
 
 
 def check_period_order(
-    registration_until: datetime,
+    registration_starts_at: datetime,
     starts_at: datetime,
     checkin_until: datetime,
     sale_starts_at: datetime,
 ) -> bool:
-    return registration_until <= starts_at < checkin_until <= sale_starts_at
+    return registration_starts_at <= starts_at < checkin_until <= sale_starts_at
 
 
 class EventCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
-    # the three periods: registration → QR scanning → sale (start only)
-    registration_until: datetime
+    # the three periods: registration (opens here) → QR scanning → sale
+    registration_starts_at: datetime
     starts_at: datetime
     checkin_until: datetime
     sale_starts_at: datetime
@@ -52,7 +52,12 @@ class EventCreate(BaseModel):
 
     @model_validator(mode="after")
     def _check_window(self) -> "EventCreate":
-        times = (self.registration_until, self.starts_at, self.checkin_until, self.sale_starts_at)
+        times = (
+            self.registration_starts_at,
+            self.starts_at,
+            self.checkin_until,
+            self.sale_starts_at,
+        )
         if any(t.tzinfo is None for t in times):
             raise ValueError("Vaqtlar vaqt mintaqasi bilan yuborilishi kerak (ISO 8601)")
         if not check_period_order(*times):
@@ -62,7 +67,7 @@ class EventCreate(BaseModel):
 
 class EventUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
-    registration_until: datetime | None = None
+    registration_starts_at: datetime | None = None
     starts_at: datetime | None = None
     checkin_until: datetime | None = None
     sale_starts_at: datetime | None = None
@@ -82,7 +87,7 @@ class EventOut(BaseModel):
 
     id: int
     name: str
-    registration_until: datetime
+    registration_starts_at: datetime
     starts_at: datetime
     checkin_until: datetime
     sale_starts_at: datetime

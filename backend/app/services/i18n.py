@@ -111,6 +111,36 @@ _T: dict[str, dict[str, str]] = {
         "ru": "Открытых мероприятий пока нет. Попробуйте снова, когда объявят продажу.",
         "en": "There are no open events yet. Please try again when a sale is announced.",
     },
+    # ------------------------------------------- before registration opens ---
+    "prestart_header": {
+        "uz": "⏳ Sotuv hali boshlanmagan — ro'yxatdan o'tish keyinroq ochiladi.",
+        "ru": "⏳ Продажа ещё не началась — регистрация откроется позже.",
+        "en": "⏳ The sale has not started yet — registration opens later.",
+    },
+    "prestart_event_line": {
+        "uz": "• {name} — ro'yxat {opens} da ochiladi, sotuv {sale} da boshlanadi",
+        "ru": "• {name} — регистрация откроется {opens}, продажа начнётся {sale}",
+        "en": "• {name} — registration opens at {opens}, the sale starts at {sale}",
+    },
+    "prestart_how": {
+        "uz": "📋 Navbat qanday shakllanadi:\nRo'yxat ochilgach botda ro'yxatdan o'tasiz va "
+              "4 harfli kod bilan QR olasiz. Sotuv kuni QR qabulxonada skanerlanadi va navbat "
+              "faqat kelgani belgilanganlar orasida, botda ro'yxatdan o'tgan vaqt bo'yicha "
+              "tuziladi. Kech kelganlar kun oxiri navbatiga qo'shiladi.",
+        "ru": "📋 Как формируется очередь:\nКогда откроется регистрация, вы зарегистрируетесь "
+              "в боте и получите 4-буквенный код с QR. В день продажи QR сканируется на "
+              "ресепшене, и очередь строится только среди отметившихся — по времени "
+              "регистрации в боте. Опоздавшие попадают в очередь конца дня.",
+        "en": "📋 How the queue is formed:\nOnce registration opens, you register in the bot "
+              "and get a 4-letter code with a QR. On the sale day the QR is scanned at the "
+              "reception, and the queue is built only among checked-in clients — ordered by "
+              "bot registration time. Latecomers join the end-of-day queue.",
+    },
+    "event_not_open_alert": {
+        "uz": "Ro'yxatdan o'tish hali boshlanmagan",
+        "ru": "Регистрация ещё не началась",
+        "en": "Registration has not started yet",
+    },
     "welcome_single_event": {
         "uz": "Assalomu alaykum! «{event}» uchun onlayn navbat botiga xush kelibsiz.\n\n"
               "Ro'yxatdan o'tish uchun 2 ta qadam bor: F.I.Sh. va telefon raqam. "
@@ -200,11 +230,11 @@ _T: dict[str, dict[str, str]] = {
     },
     "registered_ok": {"uz": "✅ Ro'yxatdan o'tdingiz!", "ru": "✅ Вы зарегистрированы!", "en": "✅ You are registered!"},
     "registered_ok_late": {
-        "uz": "✅ Ro'yxatga olindingiz! Asosiy ro'yxat davri tugagani uchun QR skanerlangach "
+        "uz": "✅ Ro'yxatga olindingiz! Skanerlash davri tugagani uchun QR skanerlangach "
               "kun oxiri (oxirgi) navbatga qo'shilasiz.",
-        "ru": "✅ Вы зарегистрированы! Основной период регистрации завершился, поэтому после "
+        "ru": "✅ Вы зарегистрированы! Период сканирования уже завершился, поэтому после "
               "сканирования QR вы попадёте в очередь конца дня.",
-        "en": "✅ You are registered! The main registration period is over, so after your QR "
+        "en": "✅ You are registered! The scanning window is already over, so after your QR "
               "is scanned you will join the end-of-day queue.",
     },
     "not_registered_yet": {

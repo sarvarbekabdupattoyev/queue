@@ -18,12 +18,14 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 ## The core rule
 
 1. The owner creates a **sale event** with three clearly separated periods:
-   **registration** (until `registration_until`), **QR scanning** (`starts_at` →
+   **registration** (opens at `registration_starts_at`), **QR scanning** (`starts_at` →
    `checkin_until`) and the **sale** (`sale_starts_at`, start time only).
 2. The Telegram bot registers clients and hands out **random, non-sequential 4-letter
-   uppercase codes** (AAAA–ZZZZ, unique per event). Registration never closes until the
-   sale ends — clients registered after `registration_until` simply join the **end-of-day
-   group** once scanned.
+   uppercase codes** (AAAA–ZZZZ, unique per event). Before `registration_starts_at` the
+   bot registers nobody — it answers with an info card instead (the sale has not started,
+   when registration opens, how the queue will form, company locations and call-center
+   numbers). Once open, registration never closes until the sale ends — clients who end
+   up scanning after `checkin_until` simply join the **end-of-day group**.
 3. Reception scans QR codes (or types the code); each QR is **single-use**. Scans after
    `checkin_until` keep working but go to the end-of-day group. The owner and scanners can
    also add **walk-in clients** (name + phone) who go straight to the end of the queue and
@@ -49,7 +51,7 @@ Client (Telegram)              Reception (scanner role)        Office TV (public
 - **Desks ("tables")** — numbered desks, optionally pinned to a manager and a branch
   (numbers are unique per branch).
 - **Sale events** — many per company, each with its own dates (entered as Tashkent local time,
-  24-hour), live phase (`registration → checkin → queue / hold / ended`), owner sale controls
+  24-hour), live phase (`announced → registration → checkin → queue / hold / ended`), owner sale controls
   (hold / resume / end / reopen), a branch multiselect and an unguessable public display link
   (`?branch=` pins a TV to one branch).
 - **Owner statistics** — `/api/stats/overview` aggregates for the dashboard charts: daily

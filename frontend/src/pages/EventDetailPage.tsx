@@ -113,7 +113,7 @@ export default function EventDetailPage() {
           </span>
         ))}
         <span className="hint hide-sm">
-          Ro‘yxat {formatDateTime(event.registration_until)} gacha · Skanerlash{' '}
+          Ro‘yxat {formatDateTime(event.registration_starts_at)} dan · Skanerlash{' '}
           {formatDateTime(event.starts_at)} — {formatDateTime(event.checkin_until)} · Sotuv{' '}
           {formatDateTime(event.sale_starts_at)} dan
         </span>

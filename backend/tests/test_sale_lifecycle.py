@@ -1,14 +1,17 @@
-"""The three-period model: late registration, the sale start/hold/end/reopen
-controls, the one-time sale-start notification burst, staff walk-ins and
-single-use QR codes."""
+"""The three-period model: the registration gate, the sale
+start/hold/end/reopen controls, the one-time sale-start notification burst,
+staff walk-ins and single-use QR codes."""
 
 import re
+from datetime import timedelta
 
 from sqlalchemy import select
 
+from app.db.base import now_utc
 from app.db.session import SessionFactory
 from app.models import SaleEvent, Ticket
-from app.services import notify, queue_service
+from app.services import notify, queue_service, ticket_service
+from app.services.errors import DomainError
 from tests.conftest import auth, event_times, started_sale_times
 from tests.test_queue_logic import close_checkin_window, create_event, make_ticket, setup_company
 
@@ -33,26 +36,76 @@ async def sale_action(client, token, event_id, action, expect=200):
     return response.json()
 
 
+# ----------------------------------------------------- registration gate ---
+
+async def test_registration_gated_until_start(client):
+    """Before ``registration_starts_at`` nobody gets a ticket — not via the
+    bot path (create_ticket) and not as a staff walk-in; the event reports
+    the ``announced`` phase. Once the moment passes, registration opens."""
+    token, _ = await setup_company(client, desks=0)
+    event = await create_event(client, token, reg_min=30)  # opens in 30 min
+    assert (await get_event(client, token, event["id"]))["phase"] == "announced"
+
+    async with SessionFactory() as db:
+        ev = await db.get(SaleEvent, event["id"])
+        assert ev.registration_pending() is True and ev.registration_open() is False
+        try:
+            await ticket_service.create_ticket(
+                db, ev, first_name="Erta", last_name="Mijoz", phone="+998901000001"
+            )
+            message = None
+        except DomainError as exc:
+            message = exc.message
+    assert message == "Ro'yxatdan o'tish hali boshlanmagan"
+
+    walkin = await client.post(
+        f"/api/queue/{event['id']}/walkin",
+        json={"first_name": "Karim", "last_name": "Olimov", "phone": "+998905550001"},
+        headers=auth(token),
+    )
+    assert walkin.status_code == 400
+
+    # the opening moment passes → registration is open and stays open
+    reg_open = (now_utc() - timedelta(minutes=1)).isoformat()
+    updated = await client.patch(
+        f"/api/events/{event['id']}",
+        json={"registration_starts_at": reg_open},
+        headers=auth(token),
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["phase"] == "registration"
+    ticket = await make_ticket(event["id"], "+998901000002", 0)
+    assert re.fullmatch(r"[A-Z]{4}", ticket["number"])
+
+
 # ------------------------------------------------------------ late group ---
 
-async def test_registration_after_period_joins_last_queue(client):
-    """Registration never closes: a client registered after the registration
-    period still gets a QR, but lands in the end-of-day queue once scanned."""
+async def test_late_scan_joins_last_queue(client):
+    """Once open, registration never closes until the sale is deactivated or
+    ends — but a QR scanned after the scanning window lands in the
+    end-of-day queue."""
     token, _ = await setup_company(client, desks=0)
-    # registration period already over; the scan window is open
-    event = await create_event(client, token, reg_min=-30, starts_min=-10)
+    # registration opened an hour ago; the scan window is open
+    event = await create_event(client, token, reg_min=-60, starts_min=-10)
 
-    early = await make_ticket(event["id"], "+998901000001", -3600)  # registered in time
-    late_born = await make_ticket(event["id"], "+998901000002", 0)  # registered after
+    early = await make_ticket(event["id"], "+998901000001", -3600)
+    late_comer = await make_ticket(event["id"], "+998901000002", 0)
 
     early_result = await checkin(client, token, event["id"], early["number"])
-    late_result = await checkin(client, token, event["id"], late_born["number"])
     assert early_result["kind"] == "arrived" and early_result["ticket"]["late"] is False
+
+    # the scanning window closes; the second client arrives only after that
+    closed = (now_utc() - timedelta(seconds=1)).isoformat()
+    moved = await client.patch(
+        f"/api/events/{event['id']}", json={"checkin_until": closed}, headers=auth(token)
+    )
+    assert moved.status_code == 200, moved.text
+    late_result = await checkin(client, token, event["id"], late_comer["number"])
     assert late_result["kind"] == "late" and late_result["ticket"]["late"] is True
 
     state = (await client.get(f"/api/events/{event['id']}/state", headers=auth(token))).json()
     waiting = [(t["number"], t["late"]) for t in state["waiting_list"]]
-    assert waiting == [(early["number"], False), (late_born["number"], True)]
+    assert waiting == [(early["number"], False), (late_comer["number"], True)]
 
 
 # ----------------------------------------------------- sale lifecycle ---

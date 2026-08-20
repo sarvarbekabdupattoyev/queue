@@ -63,6 +63,9 @@ async def create_ticket(
     bot_id: int | None = None,
     source: TicketSource = TicketSource.BOT,
 ) -> Ticket:
+    if event.registration_pending():
+        # announced, but the registration period has not opened yet
+        raise DomainError("Ro'yxatdan o'tish hali boshlanmagan")
     if not event.registration_open():
         raise DomainError("Bu tadbir uchun ro'yxatdan o'tish yopilgan")
     # A rollback below expires `event`'s loaded attributes; touching event.id

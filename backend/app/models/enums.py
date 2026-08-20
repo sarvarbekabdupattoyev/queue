@@ -31,7 +31,8 @@ class EventPhase(str, enum.Enum):
     """Derived lifecycle of a sale event (not stored)."""
 
     CLOSED = "closed"              # deactivated by the owner
-    REGISTRATION = "registration"  # on-time bot registration period
+    ANNOUNCED = "announced"        # registration not open yet; the bot only shows info
+    REGISTRATION = "registration"  # bot registration is open, scanning not yet
     CHECKIN = "checkin"            # QR scanning period, before the sale starts
     QUEUE = "queue"                # sale running: calling is open
     HOLD = "hold"                  # sale paused by the owner; calling blocked
