@@ -64,7 +64,7 @@ async def test_bot_ticket_caption_shows_ms_registration_time(client):
         async def answer_photo(self, photo, caption, reply_markup=None) -> None:
             self.photos.append((photo, caption))
 
-    from app.services.telegram.handlers import _send_ticket
+    from app.services.telegram.handlers import _deliver_ticket, _ticket_message
 
     async with SessionFactory() as db:
         event = await db.get(SaleEvent, event_id)
@@ -72,14 +72,19 @@ async def test_bot_ticket_caption_shows_ms_registration_time(client):
             db, event, first_name="Sardor", last_name="Rahimov",
             phone="+998901112233", telegram_chat_id=808,
         )
-        message = FakeMessage()
-        await _send_ticket(message, db, ticket, "uz")
-        assert len(message.photos) == 1
-        caption = message.photos[0][1]
-        assert f"№{ticket.number}" in caption
-        # the exact bot registration moment, milliseconds included — it IS
-        # the queue order the client will be served in
-        assert queue_service.fmt_local_ms(ticket.registered_at) in caption
+        # the caption is built while the session is open...
+        ticket_message = await _ticket_message(db, ticket, "uz")
+
+    # ...and the photo goes out after it is closed, so a rate-limited upload
+    # never keeps a pooled database connection to itself
+    message = FakeMessage()
+    await _deliver_ticket(message, ticket_message, "uz")
+    assert len(message.photos) == 1
+    caption = message.photos[0][1]
+    assert f"№{ticket.number}" in caption
+    # the exact bot registration moment, milliseconds included — it IS
+    # the queue order the client will be served in
+    assert queue_service.fmt_local_ms(ticket.registered_at) in caption
 
 
 # ------------------------------------------------------------- rate limiter ---

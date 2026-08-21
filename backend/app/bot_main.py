@@ -78,12 +78,19 @@ async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str = Header(default=""),
 ) -> dict:
-    payload = await request.json()
-    accepted = await bot_manager.feed_webhook(
-        bot_id, x_telegram_bot_api_secret_token, payload
-    )
-    if not accepted:
+    # The secret is checked BEFORE the body is parsed: parsing first let any
+    # unauthenticated caller turn a malformed body into a 500 with a stack
+    # trace in the logs instead of the flat 403 this endpoint owes them.
+    if not bot_manager.verify_webhook(bot_id, x_telegram_bot_api_secret_token):
         # unknown bot or wrong secret — don't leak which
+        raise HTTPException(status_code=403, detail="forbidden")
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad request") from None
+    if not await bot_manager.feed_webhook(
+        bot_id, x_telegram_bot_api_secret_token, payload
+    ):
         raise HTTPException(status_code=403, detail="forbidden")
     return {"ok": True}
 

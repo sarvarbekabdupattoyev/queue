@@ -18,6 +18,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import now_utc
@@ -43,6 +44,10 @@ TASHKENT = ZoneInfo("Asia/Tashkent")
 # the payload against a pathological single event without behaving like a
 # cap for any realistic one-office queue.
 DISPLAY_ROSTER_LIMIT = 500
+
+# Chat ids are looked up in batches: one bind parameter per id would blow
+# PostgreSQL's 32 767-parameter statement limit on a full sale day.
+LANG_LOOKUP_CHUNK = 5_000
 
 
 def fmt_local(dt: datetime) -> str:
@@ -135,6 +140,13 @@ async def position_of(db: AsyncSession, ticket: Ticket) -> int | None:
         )
     )
     return (ahead or 0) + 1
+
+
+def _ahead(position: int | None) -> int:
+    """People ahead of a client, from a 1-based position. ``None`` means the
+    ticket left the waiting list mid-action (a desk called it) — report 0
+    rather than crashing the scan with ``None - 1``."""
+    return max((position or 1) - 1, 0)
 
 
 async def get_ticket_by_number(db: AsyncSession, event_id: int, number: str) -> Ticket:
@@ -271,9 +283,13 @@ def _event_info(event: SaleEvent, company: Company | None) -> dict[str, Any]:
 
 
 async def build_states(
-    db: AsyncSession, event: SaleEvent
+    db: AsyncSession, event: SaleEvent, *, include_staff: bool = True
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build the public (display) and staff payloads in one query pass.
+
+    ``include_staff=False`` stops right after the public payload: the TV board
+    and the public ticket page would otherwise build — and throw away — a
+    staff entry per waiting ticket on every poll and every reconnect.
 
     Branch events keep ONE payload per event (one broadcast room): every
     ticket entry carries its branch_id and ``by_branch`` holds the per-branch
@@ -333,6 +349,9 @@ async def build_states(
         "stats": public_stats(stats),
     }
 
+    if not include_staff:
+        return public_state, {}
+
     branch_positions: dict[int | None, int] = {}
 
     def staff_view(t: Ticket, waiting_entry: bool = False) -> dict[str, Any]:
@@ -368,7 +387,7 @@ async def build_states(
 
 
 async def build_public_state(db: AsyncSession, event: SaleEvent) -> dict[str, Any]:
-    public_state, _ = await build_states(db, event)
+    public_state, _ = await build_states(db, event, include_staff=False)
     return public_state
 
 
@@ -405,16 +424,36 @@ async def _ticket_lang(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> st
 
 # ----------------------------------------------------------------- actions ---
 
+# Everything except an already finished or already cancelled ticket can be
+# cancelled by the owner (the inverse of the old in-Python guard).
+CANCELLABLE_STATUSES = (
+    TicketStatus.REGISTERED,
+    TicketStatus.CHECKED_IN,
+    TicketStatus.CALLED,
+    TicketStatus.SERVING,
+    TicketStatus.SKIPPED,
+)
+
 async def _claim_status(
-    db: AsyncSession, ticket: Ticket, expected: TicketStatus, **values: Any
+    db: AsyncSession,
+    ticket: Ticket,
+    expected: TicketStatus | tuple[TicketStatus, ...],
+    **values: Any,
 ) -> bool:
     """Move a ticket out of ``expected`` atomically. Two concurrent scans of
     the same QR race here — exactly one wins; the loser sees the new status
-    after the refresh and reports the QR as already used."""
+    after the refresh and reports the QR as already used.
+
+    Every staff transition goes through this: a guard that reads
+    ``ticket.status`` in Python and then commits plain assignments lets two
+    concurrent actions (finish + cancel, double skip) both pass and the last
+    commit win, so the condition belongs in the UPDATE itself.
+    """
+    statuses = (expected,) if isinstance(expected, TicketStatus) else tuple(expected)
     claimed = (
         await db.execute(
             update(Ticket)
-            .where(Ticket.id == ticket.id, Ticket.status == expected)
+            .where(Ticket.id == ticket.id, Ticket.status.in_(statuses))
             .values(**values)
             .execution_options(synchronize_session=False)
         )
@@ -462,9 +501,11 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
                     lang, key, number=ticket.number, time=fmt_local(event.sale_starts_at)
                 )
             else:
+                # a desk may call this ticket between the claim and here,
+                # which makes position_of() return None — never arithmetic on it
                 position = await position_of(db, ticket)
                 message = i18n.t(
-                    lang, "ntf_checkin_late", number=ticket.number, ahead=position - 1
+                    lang, "ntf_checkin_late", number=ticket.number, ahead=_ahead(position)
                 )
             schedule_event_broadcast(event_id)
             await _notify(event, ticket, message)
@@ -508,7 +549,7 @@ async def check_in(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> dict[s
         await _notify(
             event,
             ticket,
-            i18n.t(lang, "ntf_rejoined_late", number=ticket.number, ahead=position - 1),
+            i18n.t(lang, "ntf_rejoined_late", number=ticket.number, ahead=_ahead(position)),
         )
         return {"ok": True, "kind": "late", "message": "Kun oxiri navbatiga qo'shildi", "ticket": ticket}
 
@@ -575,15 +616,26 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
         # conditional UPDATE, not a plain attribute assignment) so only one
         # desk wins; the other simply moves on to the next ticket in line
         # instead of silently overwriting the winner's desk assignment.
-        won = await _claim_status(
-            db,
-            ticket,
-            TicketStatus.CHECKED_IN,
-            status=TicketStatus.CALLED,
-            desk_id=desk.id,
-            called_at=now_utc(),
-            call_count=Ticket.call_count + 1,
-        )
+        try:
+            won = await _claim_status(
+                db,
+                ticket,
+                TicketStatus.CHECKED_IN,
+                status=TicketStatus.CALLED,
+                desk_id=desk.id,
+                called_at=now_utc(),
+                call_count=Ticket.call_count + 1,
+            )
+        except IntegrityError:
+            # The busy pre-check above and this claim are separate
+            # transactions, so a second "call next" for the SAME desk can slip
+            # between them (double click, retry on a slow network). The partial
+            # unique index on an active desk is what actually rejects it —
+            # otherwise both clients get told to walk to the same desk.
+            await db.rollback()
+            raise ConflictError(
+                "Bu stolda hali mijoz bor — avval yakunlang yoki o'tkazib yuboring"
+            ) from None
         if won:
             break
     schedule_event_broadcast(event.id)
@@ -604,12 +656,15 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
 
 
 async def recall(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
-    if ticket.status != TicketStatus.CALLED:
-        raise DomainError("Faqat chaqirilgan mijozni qayta chaqirish mumkin")
     desk = await db.get(Desk, ticket.desk_id) if ticket.desk_id else None
-    ticket.called_at = now_utc()
-    ticket.call_count += 1
-    await db.commit()
+    if not await _claim_status(
+        db,
+        ticket,
+        TicketStatus.CALLED,
+        called_at=now_utc(),
+        call_count=Ticket.call_count + 1,
+    ):
+        raise DomainError("Faqat chaqirilgan mijozni qayta chaqirish mumkin")
     schedule_event_broadcast(event.id)
     lang = await _ticket_lang(db, event, ticket)
     await _notify(
@@ -621,21 +676,24 @@ async def recall(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
 
 
 async def start_serving(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
-    if ticket.status != TicketStatus.CALLED:
+    if not await _claim_status(
+        db, ticket, TicketStatus.CALLED, status=TicketStatus.SERVING
+    ):
         raise DomainError("Faqat chaqirilgan mijozni qabul qilish mumkin")
-    ticket.status = TicketStatus.SERVING
-    await db.commit()
     schedule_event_broadcast(event.id)
     return ticket
 
 
 async def skip(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
-    if ticket.status != TicketStatus.CALLED:
+    if not await _claim_status(
+        db,
+        ticket,
+        TicketStatus.CALLED,
+        status=TicketStatus.SKIPPED,
+        skip_count=Ticket.skip_count + 1,
+        desk_id=None,
+    ):
         raise DomainError("Faqat chaqirilgan mijozni o'tkazib yuborish mumkin")
-    ticket.status = TicketStatus.SKIPPED
-    ticket.skip_count += 1
-    ticket.desk_id = None
-    await db.commit()
     schedule_event_broadcast(event.id)
     lang = await _ticket_lang(db, event, ticket)
     key = "ntf_skip_final" if ticket.skip_count >= 2 else "ntf_skip_once"
@@ -649,13 +707,16 @@ async def finish(
     ticket: Ticket,
     contract_signed: bool | None = None,
 ) -> Ticket:
-    if ticket.status not in TicketStatus.active_desk_statuses():
+    if not await _claim_status(
+        db,
+        ticket,
+        TicketStatus.active_desk_statuses(),
+        status=TicketStatus.DONE,
+        # the manager's answer to "was a contract signed?" — the sale outcome
+        contract_signed=contract_signed,
+        finished_at=now_utc(),
+    ):
         raise DomainError("Faqat stoldagi mijozni yakunlash mumkin")
-    ticket.status = TicketStatus.DONE
-    # the manager's answer to "was a contract signed?" — the sale outcome
-    ticket.contract_signed = contract_signed
-    ticket.finished_at = now_utc()
-    await db.commit()
     await _maybe_end_sale(db, event)
     schedule_event_broadcast(event.id)
     lang = await _ticket_lang(db, event, ticket)
@@ -664,11 +725,10 @@ async def finish(
 
 
 async def cancel(db: AsyncSession, event: SaleEvent, ticket: Ticket) -> Ticket:
-    if ticket.status in (TicketStatus.DONE, TicketStatus.CANCELLED):
+    if not await _claim_status(
+        db, ticket, CANCELLABLE_STATUSES, status=TicketStatus.CANCELLED, desk_id=None
+    ):
         raise DomainError("Bu navbatni bekor qilib bo'lmaydi")
-    ticket.status = TicketStatus.CANCELLED
-    ticket.desk_id = None
-    await db.commit()
     await _maybe_end_sale(db, event)
     schedule_event_broadcast(event.id)
     lang = await _ticket_lang(db, event, ticket)
@@ -682,21 +742,36 @@ async def _maybe_end_sale(db: AsyncSession, event: SaleEvent) -> None:
     chance only while the sale runs; the owner can always reopen."""
     if not event.queue_started() or event.sale_hold:
         return
-    remaining = await db.scalar(
-        select(func.count())
-        .select_from(Ticket)
+    event_id = event.id
+    # COUNT-then-write let a check-in commit in between, ending the sale on a
+    # client who had just been queued (and who no desk may call afterwards).
+    # One conditional UPDATE re-evaluates "nobody left" at write time instead.
+    still_queued = (
+        select(Ticket.id)
         .where(
-            Ticket.event_id == event.id,
+            Ticket.event_id == event_id,
             Ticket.status.in_(
                 (TicketStatus.CHECKED_IN, TicketStatus.CALLED, TicketStatus.SERVING)
             ),
         )
+        .exists()
     )
-    if remaining:
-        return
-    event.sale_ended_at = now_utc()
+    ended = (
+        await db.execute(
+            update(SaleEvent)
+            .where(
+                SaleEvent.id == event_id,
+                SaleEvent.sale_ended_at.is_(None),
+                ~still_queued,
+            )
+            .values(sale_ended_at=now_utc())
+            .execution_options(synchronize_session=False)
+        )
+    ).rowcount
     await db.commit()
-    log.info("Sale for event %s ended automatically — queue drained", event.id)
+    if ended:
+        await db.refresh(event)
+        log.info("Sale for event %s ended automatically — queue drained", event_id)
 
 
 async def staff_add_ticket(
@@ -755,16 +830,21 @@ async def notify_sale_started(db: AsyncSession, event: SaleEvent) -> int:
     waiting = await waiting_tickets(db, event.id)
     chat_ids = [t.telegram_chat_id for t in waiting if t.telegram_chat_id is not None]
     langs: dict[int, str] = {}
-    if chat_ids:
+    # An expanding IN() binds one parameter per chat id and PostgreSQL's wire
+    # protocol caps a statement at 32 767 of them — at this product's stated
+    # scale the whole sale-start burst would raise before a single message
+    # went out, and the claim that guards it has already been committed.
+    for start in range(0, len(chat_ids), LANG_LOOKUP_CHUNK):
+        chunk = chat_ids[start : start + LANG_LOOKUP_CHUNK]
         rows = (
             await db.execute(
                 select(BotUser.chat_id, BotUser.language).where(
                     BotUser.company_id == event.company_id,
-                    BotUser.chat_id.in_(chat_ids),
+                    BotUser.chat_id.in_(chunk),
                 )
             )
         ).all()
-        langs = dict(rows)
+        langs.update(rows)
     positions: dict[int | None, int] = {}
     sent = 0
     for t in waiting:

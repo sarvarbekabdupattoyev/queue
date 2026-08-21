@@ -1,9 +1,12 @@
+import logging
 from collections.abc import AsyncIterator
 
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+
+log = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -51,6 +54,7 @@ async def create_schema() -> None:
             await conn.execute(text("SELECT pg_advisory_xact_lock(752130421)"))
         await conn.run_sync(Base.metadata.create_all)
         await _add_missing_columns(conn)
+        await _add_missing_indexes(conn)
         await _drop_stale_constraints(conn)
         await _migrate_single_branch_events(conn)
         await _migrate_company_bot_tokens(conn)
@@ -81,6 +85,64 @@ async def _add_missing_columns(conn) -> None:
                 await conn.execute(
                     text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
                 )
+
+
+# Indexes added to tables that already existed in earlier deployments.
+# create_all() only ever CREATEs missing tables, so an index added to a table
+# that is already there never reaches an upgraded database on its own.
+_ADDED_INDEXES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_ticket_waiting "
+    "ON tickets (event_id, status, queue_order, id)",
+    "CREATE INDEX IF NOT EXISTS ix_ticket_waiting_branch "
+    "ON tickets (event_id, branch_id, status, queue_order, id)",
+)
+
+# Superseded by the covering waiting-list indexes above — their columns are a
+# leading prefix of the new ones, and every redundant index costs write
+# throughput during a registration burst.
+_DROPPED_INDEXES: tuple[str, ...] = (
+    "ix_ticket_event_status",
+    "ix_ticket_event_branch_status",
+)
+
+_ACTIVE_DESK_PREDICATE = "desk_id IS NOT NULL AND status IN ('CALLED', 'SERVING')"
+
+
+async def _add_missing_indexes(conn) -> None:
+    for statement in _ADDED_INDEXES:
+        await conn.execute(text(statement))
+    await _add_active_desk_index(conn)
+    for name in _DROPPED_INDEXES:
+        await conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
+
+
+async def _add_active_desk_index(conn) -> None:
+    """A desk serves one client at a time; that is enforced by a partial
+    unique index (see Ticket). A database upgraded from before it may already
+    hold a desk with two active tickets — precisely the bug the index
+    prevents — and creating it would then fail and take startup down with it.
+    Check first and leave the data for an operator to sort out instead."""
+    clash = await conn.scalar(
+        text(
+            "SELECT desk_id FROM tickets "
+            f"WHERE {_ACTIVE_DESK_PREDICATE} "
+            "GROUP BY desk_id HAVING COUNT(*) > 1 LIMIT 1"
+        )
+    )
+    if clash is not None:
+        log.warning(
+            "Desk %s holds more than one active ticket — skipping the "
+            "uq_ticket_desk_active index; finish or skip the duplicates and "
+            "restart to enforce one client per desk",
+            clash,
+        )
+        return
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ticket_desk_active "
+            f"ON tickets (desk_id) WHERE {_ACTIVE_DESK_PREDICATE}"
+        )
+    )
 
 
 async def _migrate_single_branch_events(conn) -> None:
