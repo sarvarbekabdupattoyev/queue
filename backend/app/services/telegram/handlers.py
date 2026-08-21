@@ -26,6 +26,7 @@ import html
 import logging
 import re
 from contextlib import suppress
+from typing import NamedTuple
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -244,9 +245,24 @@ async def _menu_for(
     return main_menu(lang, registered=await _is_registered(session, company_id, chat_id))
 
 
-async def _send_ticket(
-    message: Message, session: AsyncSession, ticket: Ticket, lang: str, intro: str = ""
-) -> None:
+class TicketMessage(NamedTuple):
+    """Everything needed to send a ticket, read from the database up front.
+
+    Sending it means a QR render plus an upload that the per-bot rate limiter
+    may hold back for seconds (longer under flood control). Doing that inside
+    an open session pins a pooled connection for the whole wait, which is what
+    exhausts the pool during a registration burst — so the DB half stops here
+    and the delivery happens after the session is closed.
+    """
+
+    caption: str
+    code: str
+    number: str
+
+
+async def _ticket_message(
+    session: AsyncSession, ticket: Ticket, lang: str, intro: str = ""
+) -> TicketMessage:
     event = await session.get(SaleEvent, ticket.event_id)
     branch = await session.get(Branch, ticket.branch_id) if ticket.branch_id else None
     branch_line = ""
@@ -269,14 +285,21 @@ async def _send_ticket(
         deadline=queue_service.fmt_local(event.checkin_until),
         status=status_label(lang, ticket.status),
     )
+    return TicketMessage(caption=caption, code=ticket.code, number=ticket.number)
+
+
+async def _deliver_ticket(message: Message, ticket: TicketMessage, lang: str) -> None:
+    """Telegram half of sending a ticket — no database connection held."""
     # PIL work happens in the process pool — a burst of registrations must not
     # serialize on QR rendering in the event loop. Plain code only, no drawn
-    # label: the caption above already shows "№{number}" as real text, and a
+    # label: the caption already shows "№{number}" as real text, and a
     # PIL-rendered "№" glyph was missing from the fallback font, rendering as
     # a broken tofu box on some deployments.
     png = await qr_png_bytes_async(ticket.code)
     photo = BufferedInputFile(png, filename=f"navbat-{ticket.number}.png")
-    await message.answer_photo(photo=photo, caption=caption, reply_markup=main_menu(lang))
+    await message.answer_photo(
+        photo=photo, caption=ticket.caption, reply_markup=main_menu(lang)
+    )
 
 
 async def _status_text(session: AsyncSession, ticket: Ticket, lang: str) -> str:
@@ -464,11 +487,11 @@ async def cmd_start(message: Message, state: FSMContext, company_id: int) -> Non
     await state.clear()
     async with SessionFactory() as session:
         lang = await _stored_lang(session, company_id, message.chat.id)
-        if lang is None:
-            await state.set_state(Registration.choosing_language)
-            await message.answer(LANGUAGE_PROMPT, reply_markup=language_keyboard())
-            return
-        await _start_flow(message, state, session, company_id, norm_lang(lang))
+    if lang is None:
+        await state.set_state(Registration.choosing_language)
+        await message.answer(LANGUAGE_PROMPT, reply_markup=language_keyboard())
+        return
+    await _start_flow(message, state, company_id, norm_lang(lang))
 
 
 async def choose_language_start(
@@ -481,10 +504,10 @@ async def choose_language_start(
         return
     async with SessionFactory() as session:
         await _save_lang(session, company_id, callback.message.chat.id, lang)
-        await callback.answer()
-        await state.clear()
-        await callback.message.answer(t(lang, "language_saved"))
-        await _start_flow(callback.message, state, session, company_id, lang)
+    await callback.answer()
+    await state.clear()
+    await callback.message.answer(t(lang, "language_saved"))
+    await _start_flow(callback.message, state, company_id, lang)
 
 
 async def change_language(callback: CallbackQuery, company_id: int) -> None:
@@ -501,29 +524,42 @@ async def change_language(callback: CallbackQuery, company_id: int) -> None:
 
 
 async def _start_flow(
-    message: Message, state: FSMContext, session: AsyncSession, company_id: int, lang: str
+    message: Message, state: FSMContext, company_id: int, lang: str
 ) -> None:
-    events = await _open_events(session, company_id)
-    tickets = await _my_tickets(session, company_id, message.chat.id)
-    ticket_event_ids = {ticket.event_id for ticket in tickets}
-    open_without_ticket = [e for e in events if e.id not in ticket_event_ids]
+    """Everything /start needs is read first; the answers are sent afterwards,
+    with the database connection already back in the pool."""
+    ticket_messages: list[TicketMessage] = []
+    prestart_text: str | None = None
+    menu: ReplyKeyboardMarkup | None = None
+    async with SessionFactory() as session:
+        events = await _open_events(session, company_id)
+        tickets = await _my_tickets(session, company_id, message.chat.id)
+        ticket_event_ids = {ticket.event_id for ticket in tickets}
+        open_without_ticket = [e for e in events if e.id not in ticket_event_ids]
+        if tickets and not open_without_ticket:
+            ticket_messages = [
+                await _ticket_message(session, ticket, lang) for ticket in tickets
+            ]
+        elif not open_without_ticket:
+            # nothing open to register for — announced events answer with the
+            # "sale has not started" card (opening time, queue rules,
+            # locations, call-center numbers) instead of a bare refusal
+            pending = await _pending_events(session, company_id)
+            menu = main_menu(lang, registered=bool(tickets))
+            if pending:
+                prestart_text = await _prestart_info_text(
+                    session, company_id, pending, lang
+                )
 
     if tickets and not open_without_ticket:
         await message.answer(t(lang, "already_have_tickets"))
-        for ticket in tickets:
-            await _send_ticket(message, session, ticket, lang)
+        for ticket_message in ticket_messages:
+            await _deliver_ticket(message, ticket_message, lang)
         return
     if not open_without_ticket:
-        # nothing open to register for — announced events answer with the
-        # "sale has not started" card (opening time, queue rules, locations,
-        # call-center numbers) instead of a bare refusal
-        pending = await _pending_events(session, company_id)
-        menu = main_menu(lang, registered=bool(tickets))
-        if pending:
-            text = await _prestart_info_text(session, company_id, pending, lang)
-            if text is not None:
-                await message.answer(text, reply_markup=menu, parse_mode="HTML")
-                return
+        if prestart_text is not None:
+            await message.answer(prestart_text, reply_markup=menu, parse_mode="HTML")
+            return
         await message.answer(t(lang, "no_open_events"), reply_markup=menu)
         return
     if len(open_without_ticket) == 1:
@@ -584,47 +620,71 @@ async def _data_lang(state: FSMContext) -> str:
     return norm_lang((await state.get_data()).get("lang"))
 
 
+def _callback_id(callback: CallbackQuery) -> int | None:
+    """Numeric id from ``prefix:id`` callback data. A client is free to send
+    any payload it likes, so a non-numeric one must be ignored rather than
+    raise out of the handler."""
+    try:
+        return int((callback.data or "").split(":", 1)[1])
+    except (IndexError, ValueError):
+        return None
+
+
 async def choose_event(callback: CallbackQuery, state: FSMContext, company_id: int) -> None:
-    event_id = int(callback.data.split(":", 1)[1])
+    event_id = _callback_id(callback)
     lang = await _data_lang(state)
+    if event_id is None:
+        await callback.answer()
+        return
     async with SessionFactory() as session:
         event = await session.get(SaleEvent, event_id)
-        if event is None or event.company_id != company_id or not event.registration_open():
-            key = (
-                "event_not_open_alert"
-                if event is not None
-                and event.company_id == company_id
-                and event.registration_pending()
-                else "event_closed_alert"
-            )
-            await callback.answer(t(lang, key), show_alert=True)
-            return
-        await callback.answer()
-        await _ask_branch_or_name(callback.message, state, event, lang)
+        allowed = (
+            event is not None
+            and event.company_id == company_id
+            and event.registration_open()
+        )
+        key = (
+            "event_not_open_alert"
+            if event is not None
+            and event.company_id == company_id
+            and event.registration_pending()
+            else "event_closed_alert"
+        )
+    if not allowed:
+        await callback.answer(t(lang, key), show_alert=True)
+        return
+    await callback.answer()
+    await _ask_branch_or_name(callback.message, state, event, lang)
 
 
 async def choose_branch(callback: CallbackQuery, state: FSMContext, company_id: int) -> None:
-    branch_id = int(callback.data.split(":", 1)[1])
+    branch_id = _callback_id(callback)
     data = await state.get_data()
     lang = norm_lang(data.get("lang"))
+    if branch_id is None:
+        await callback.answer()
+        return
     async with SessionFactory() as session:
         event = await session.get(SaleEvent, data.get("event_id", 0))
-        if (
-            event is None
-            or event.company_id != company_id
-            or not event.registration_open()
-            or branch_id not in event.branch_ids()
-        ):
-            key = (
-                "event_not_open_alert"
-                if event is not None
-                and event.company_id == company_id
-                and event.registration_pending()
-                else "branch_closed_alert"
-            )
-            await callback.answer(t(lang, key), show_alert=True)
-            return
-        branch_name = next(b.name for b in event.branches if b.id == branch_id)
+        allowed = (
+            event is not None
+            and event.company_id == company_id
+            and event.registration_open()
+            and branch_id in event.branch_ids()
+        )
+        key = (
+            "event_not_open_alert"
+            if event is not None
+            and event.company_id == company_id
+            and event.registration_pending()
+            else "branch_closed_alert"
+        )
+        branch_name = (
+            next(b.name for b in event.branches if b.id == branch_id) if allowed else ""
+        )
+    if not allowed:
+        await callback.answer(t(lang, key), show_alert=True)
+        return
     await callback.answer()
     await state.set_state(Registration.full_name)
     await state.update_data(branch_id=branch_id)
@@ -668,28 +728,30 @@ async def cmd_ticket(message: Message, company_id: int) -> None:
     async with SessionFactory() as session:
         lang = await _menu_lang(session, company_id, message.chat.id)
         tickets = await _my_tickets(session, company_id, message.chat.id)
-        if not tickets:
-            await message.answer(
-                t(lang, "not_registered_yet"), reply_markup=main_menu(lang, registered=False)
-            )
-            return
-        for ticket in tickets:
-            await _send_ticket(message, session, ticket, lang)
+        ticket_messages = [
+            await _ticket_message(session, ticket, lang) for ticket in tickets
+        ]
+    if not ticket_messages:
+        await message.answer(
+            t(lang, "not_registered_yet"), reply_markup=main_menu(lang, registered=False)
+        )
+        return
+    for ticket_message in ticket_messages:
+        await _deliver_ticket(message, ticket_message, lang)
 
 
 async def cmd_status(message: Message, company_id: int) -> None:
     async with SessionFactory() as session:
         lang = await _menu_lang(session, company_id, message.chat.id)
         tickets = await _my_tickets(session, company_id, message.chat.id)
-        if not tickets:
-            await message.answer(
-                t(lang, "not_registered_yet"), reply_markup=main_menu(lang, registered=False)
-            )
-            return
-        for ticket in tickets:
-            await message.answer(
-                await _status_text(session, ticket, lang), reply_markup=main_menu(lang)
-            )
+        summaries = [await _status_text(session, ticket, lang) for ticket in tickets]
+    if not summaries:
+        await message.answer(
+            t(lang, "not_registered_yet"), reply_markup=main_menu(lang, registered=False)
+        )
+        return
+    for summary in summaries:
+        await message.answer(summary, reply_markup=main_menu(lang))
 
 
 async def cmd_info(message: Message, company_id: int) -> None:
@@ -804,11 +866,20 @@ async def _finish_registration(
         return
     data = await state.get_data()
 
+    outcome: str | None = None
+    ticket_message: TicketMessage | None = None
+    menu: ReplyKeyboardMarkup | None = None
+    prestart_text: str | None = None
+    rejection: str | None = None
+
     # Transient failures (DB/connection hiccups etc.) get a couple of retries
     # on a FRESH session each time before giving up — DomainError is a real
     # rejection and is handled inline below, never retried. Retrying the
     # whole block is safe: the phone-existing-ticket check makes it
     # idempotent even if a prior attempt actually committed before failing.
+    # Only the DATABASE work is retried: a Telegram send that fails must never
+    # replay the registration, which used to answer a client whose ticket had
+    # just been created with "this phone already has one".
     for attempt in range(1, _REGISTRATION_RETRY_ATTEMPTS + 1):
         try:
             async with SessionFactory() as session:
@@ -818,14 +889,12 @@ async def _finish_registration(
                     menu = await _menu_for(session, company_id, message.chat.id, lang)
                     # the owner can move the opening time while a client is mid-flow:
                     # answer with the full "sale has not started" card, not "closed"
-                    text = None
                     if event is not None and event.registration_pending():
-                        text = await _prestart_info_text(session, company_id, [event], lang)
-                    if text is not None:
-                        await message.answer(text, reply_markup=menu, parse_mode="HTML")
-                    else:
-                        await message.answer(t(lang, "registration_closed"), reply_markup=menu)
-                    return
+                        prestart_text = await _prestart_info_text(
+                            session, company_id, [event], lang
+                        )
+                    outcome = "closed"
+                    break
                 # one phone = one ticket per event: a duplicate gets the existing one
                 existing = await ticket_service.get_ticket_by_phone(session, event.id, phone)
                 if existing is not None:
@@ -836,9 +905,9 @@ async def _finish_registration(
                         if existing.bot_id is None:
                             existing.bot_id = bot_db_id
                         await session.commit()
-                    await message.answer(t(lang, "phone_taken"), reply_markup=main_menu(lang))
-                    await _send_ticket(message, session, existing, lang)
-                    return
+                    ticket_message = await _ticket_message(session, existing, lang)
+                    outcome = "taken"
+                    break
                 try:
                     ticket = await ticket_service.create_ticket(
                         session,
@@ -853,20 +922,20 @@ async def _finish_registration(
                 except DomainError as exc:
                     await state.clear()
                     menu = await _menu_for(session, company_id, message.chat.id, lang)
-                    await message.answer(exc.message, reply_markup=menu)
-                    return
+                    rejection = exc.message
+                    outcome = "rejected"
+                    break
                 await state.clear()
                 queue_service.schedule_event_broadcast(event.id)
                 # a registration after the scanning window still gets a QR, but the
                 # client is told up front they will join the end-of-day queue
                 late_born = ticket.registered_at >= event.checkin_until
-                ok_key = "registered_ok_late" if late_born else "registered_ok"
-                await message.answer(t(lang, ok_key), reply_markup=main_menu(lang))
-                await _send_ticket(message, session, ticket, lang)
+                outcome = "registered_late" if late_born else "registered"
+                ticket_message = await _ticket_message(session, ticket, lang)
                 log.info(
                     "New ticket #%s (%s) for event %s via bot", ticket.number, phone, event.id
                 )
-                return
+                break
         except Exception as exc:
             if attempt == _REGISTRATION_RETRY_ATTEMPTS:
                 log.exception(
@@ -901,6 +970,24 @@ async def _finish_registration(
                 exc,
             )
             await asyncio.sleep(_REGISTRATION_RETRY_BASE_DELAY * attempt)
+
+    # Every answer goes out here, with the pooled connection already returned:
+    # a QR upload paced by the per-bot rate limiter can sleep for seconds, and
+    # holding a connection for that long is what starves the pool in a burst.
+    if outcome == "closed":
+        if prestart_text is not None:
+            await message.answer(prestart_text, reply_markup=menu, parse_mode="HTML")
+        else:
+            await message.answer(t(lang, "registration_closed"), reply_markup=menu)
+    elif outcome == "taken":
+        await message.answer(t(lang, "phone_taken"), reply_markup=main_menu(lang))
+        await _deliver_ticket(message, ticket_message, lang)
+    elif outcome == "rejected":
+        await message.answer(rejection, reply_markup=menu)
+    elif outcome in ("registered", "registered_late"):
+        ok_key = "registered_ok_late" if outcome == "registered_late" else "registered_ok"
+        await message.answer(t(lang, ok_key), reply_markup=main_menu(lang))
+        await _deliver_ticket(message, ticket_message, lang)
 
 
 async def menu_ticket(message: Message, company_id: int) -> None:

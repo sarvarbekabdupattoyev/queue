@@ -36,6 +36,21 @@ log = logging.getLogger("navbat")
 SALE_WATCH_INTERVAL_S = 15
 
 
+class SecureStaticFiles(StaticFiles):
+    """Uploaded media, served with scripting switched off.
+
+    Logos are uploaded by tenants and served from this app's own origin, and
+    SVG is an accepted format — an SVG document can carry <script>, so opening
+    one directly would otherwise run it against the dashboard's origin.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
 async def sale_start_watcher() -> None:
     """Fires the one-time sale-start burst: when ``sale_starts_at`` passes,
     every checked-in client gets their code, registration time and position.
@@ -87,6 +102,16 @@ async def lifespan(app: FastAPI):
         subscriber = asyncio.create_task(ws_manager.run_subscriber(), name="ws-sub")
         log.info("SmartNavbat API worker started (multi-process mode)")
     else:
+        if settings.bot_webhook_base:
+            # the webhook endpoint lives in the bot service, which only runs in
+            # multi-process mode — registering webhooks here would point every
+            # tenant's bot at a URL nothing serves
+            log.warning(
+                "BOT_WEBHOOK_BASE is set without REDIS_URL: single-process mode "
+                "embeds the bots and serves no webhook route, so Telegram would "
+                "deliver updates nowhere. Unset it, or set REDIS_URL and run the "
+                "bot service."
+            )
         await bot_manager.start_all()
         log.info("SmartNavbat API started (single-process mode, embedded bots)")
     watcher = asyncio.create_task(sale_start_watcher(), name="sale-watcher")
@@ -159,7 +184,7 @@ def create_app() -> FastAPI:
         app.include_router(router, prefix="/api")
 
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/media", StaticFiles(directory=settings.upload_dir), name="media")
+    app.mount("/media", SecureStaticFiles(directory=settings.upload_dir), name="media")
 
     @app.get("/api/health")
     async def health() -> JSONResponse:

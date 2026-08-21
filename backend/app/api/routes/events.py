@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
 from app.api.deps import CompanyEvent, DbSession, OwnCompany, require_roles
@@ -38,15 +38,39 @@ SEED_NAMES = [
 ]
 
 
-async def _event_out(db: DbSession, event: SaleEvent) -> EventOut:
-    counts = (
+async def _ticket_counts(
+    db: DbSession, event_ids: list[int]
+) -> dict[int, dict[TicketStatus, int]]:
+    """Ticket counts per status for several events in ONE query — the events
+    list used to run a grouped count per row."""
+    if not event_ids:
+        return {}
+    rows = (
         await db.execute(
-            select(Ticket.status, func.count())
-            .where(Ticket.event_id == event.id)
-            .group_by(Ticket.status)
+            select(Ticket.event_id, Ticket.status, func.count())
+            .where(Ticket.event_id.in_(event_ids))
+            .group_by(Ticket.event_id, Ticket.status)
         )
     ).all()
-    by_status = dict(counts)
+    counts: dict[int, dict[TicketStatus, int]] = {}
+    for event_id, ticket_status, count in rows:
+        counts.setdefault(event_id, {})[ticket_status] = count
+    return counts
+
+
+async def _event_out(
+    db: DbSession, event: SaleEvent, by_status: dict[TicketStatus, int] | None = None
+) -> EventOut:
+    if by_status is None:
+        by_status = dict(
+            (
+                await db.execute(
+                    select(Ticket.status, func.count())
+                    .where(Ticket.event_id == event.id)
+                    .group_by(Ticket.status)
+                )
+            ).all()
+        )
     total = sum(c for s, c in by_status.items() if s != TicketStatus.CANCELLED)
     checked_in = sum(
         c for s, c in by_status.items()
@@ -102,7 +126,8 @@ async def list_events(db: DbSession, company: OwnCompany) -> list[EventOut]:
             .order_by(SaleEvent.starts_at.desc())
         )
     ).all()
-    return [await _event_out(db, e) for e in events]
+    counts = await _ticket_counts(db, [e.id for e in events])
+    return [await _event_out(db, e, counts.get(e.id, {})) for e in events]
 
 
 @router.post("", response_model=EventOut, status_code=status.HTTP_201_CREATED, dependencies=[OwnerOnly])
@@ -245,8 +270,11 @@ async def list_tickets(
     q: str | None = None,
     ticket_status: TicketStatus | None = None,
     branch_id: int | None = None,
-    limit: int = 200,
-    offset: int = 0,
+    # bounded here, not with min(): a negative limit reached the database as
+    # LIMIT -1, which errors on PostgreSQL and returns the WHOLE event (tens of
+    # thousands of rows, phone numbers included) on SQLite
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> list[TicketOut]:
     stmt = select(Ticket).where(Ticket.event_id == event.id)
     if q:
@@ -263,7 +291,7 @@ async def list_tickets(
         stmt = stmt.where(Ticket.status == ticket_status)
     if branch_id is not None:
         stmt = stmt.where(Ticket.branch_id == branch_id)
-    stmt = stmt.order_by(Ticket.registered_at.desc()).limit(min(limit, 500)).offset(offset)
+    stmt = stmt.order_by(Ticket.registered_at.desc()).limit(limit).offset(offset)
     tickets = (await db.scalars(stmt)).all()
     desk_ids = {t.desk_id for t in tickets if t.desk_id}
     desk_numbers: dict[int, int] = {}

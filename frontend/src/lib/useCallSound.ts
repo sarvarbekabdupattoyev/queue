@@ -75,6 +75,14 @@ export function useCallSound(defaultOn: boolean, storageKey = 'sn_call_sound') {
     return () => {
       window.removeEventListener('pointerdown', unlock)
       window.removeEventListener('keydown', unlock)
+      // Browsers cap how many AudioContexts a page may hold (~6 in Chrome).
+      // A staff screen moving between panels all day would otherwise leave one
+      // running per visit and eventually lose sound entirely.
+      const context = contextRef.current
+      contextRef.current = null
+      audioRef.current = null
+      unlockedRef.current = false
+      void context?.close().catch(() => {})
     }
   }, [element])
 

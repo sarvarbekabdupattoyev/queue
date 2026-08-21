@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from contextlib import suppress
 from typing import Any
 
 from fastapi import WebSocket
@@ -20,6 +21,11 @@ from fastapi import WebSocket
 from app.core.redis import CH_WS, get_redis
 
 log = logging.getLogger(__name__)
+
+# A screen that cannot accept a payload within this window is dropped and left
+# to reconnect (the client already reconnects and re-snapshots). Without a cap
+# one stalled socket holds up every other screen in the room.
+SEND_TIMEOUT_S = 5.0
 
 
 class ConnectionManager:
@@ -39,17 +45,30 @@ class ConnectionManager:
                 self._rooms.pop(room, None)
 
     async def deliver_local(self, room: str, message: str) -> None:
-        """Send a serialized payload to sockets held by this process."""
+        """Send a serialized payload to sockets held by this process.
+
+        Sends run concurrently and each is capped by ``SEND_TIMEOUT_S``:
+        awaiting them one after another lets a single stalled client (a TV on a
+        saturated uplink) delay every other screen in the room — and, in
+        multi-process mode, block the Redis subscriber loop that feeds them.
+        """
         async with self._lock:
             sockets = list(self._rooms.get(room, ()))
-        dead: list[WebSocket] = []
-        for ws in sockets:
-            try:
-                await ws.send_text(message)
-            except Exception:  # client vanished mid-send
-                dead.append(ws)
-        for ws in dead:
-            await self.disconnect(room, ws)
+        if not sockets:
+            return
+        delivered = await asyncio.gather(
+            *(self._send(ws, message) for ws in sockets), return_exceptions=True
+        )
+        for ws, ok in zip(sockets, delivered):
+            if ok is not True:  # vanished, stalled, or already closed
+                await self.disconnect(room, ws)
+
+    async def _send(self, websocket: WebSocket, message: str) -> bool:
+        try:
+            await asyncio.wait_for(websocket.send_text(message), SEND_TIMEOUT_S)
+            return True
+        except Exception:
+            return False
 
     async def publish(self, room: str, payload: dict[str, Any]) -> None:
         """Broadcast to every connected client in the room, across workers."""
@@ -72,8 +91,8 @@ class ConnectionManager:
             redis = get_redis()
             if redis is None:
                 return
+            pubsub = redis.pubsub()
             try:
-                pubsub = redis.pubsub()
                 await pubsub.subscribe(CH_WS)
                 delay = 1.0
                 async for item in pubsub.listen():
@@ -90,6 +109,11 @@ class ConnectionManager:
                 log.warning("WS subscriber lost Redis (%s); retrying in %.0fs", exc, delay)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 15.0)
+            finally:
+                # every reconnect otherwise strands the previous subscription's
+                # connection — a flapping Redis leaks one per attempt
+                with suppress(Exception):
+                    await pubsub.aclose()
 
 
 ws_manager = ConnectionManager()

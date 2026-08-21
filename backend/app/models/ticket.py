@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,10 +27,34 @@ class Ticket(Base):
     __table_args__ = (
         UniqueConstraint("event_id", "number", name="uq_ticket_event_number"),
         UniqueConstraint("event_id", "phone", name="uq_ticket_event_phone"),
-        # hot paths: waiting-list ordering (also per branch) and per-chat lookups
-        Index("ix_ticket_event_status", "event_id", "status"),
-        Index("ix_ticket_event_branch_status", "event_id", "branch_id", "status"),
+        # Hot paths: the waiting list is always read as
+        # "event (+ branch) + status CHECKED_IN, ordered by queue_order, id" —
+        # calling the next client and every state rebuild run it. Carrying the
+        # sort columns in the index turns both into a top-1 index read instead
+        # of sorting the whole checked-in set of the event.
+        Index("ix_ticket_waiting", "event_id", "status", "queue_order", "id"),
+        Index(
+            "ix_ticket_waiting_branch",
+            "event_id",
+            "branch_id",
+            "status",
+            "queue_order",
+            "id",
+        ),
         Index("ix_ticket_event_chat", "event_id", "telegram_chat_id"),
+        # A desk serves ONE client at a time. The busy check in call_next and
+        # the claim that follows it are separate transactions, so this partial
+        # unique index is what actually stops two concurrent calls at the same
+        # desk from sending two clients to it.
+        Index(
+            "uq_ticket_desk_active",
+            "desk_id",
+            unique=True,
+            sqlite_where=text("desk_id IS NOT NULL AND status IN ('CALLED', 'SERVING')"),
+            postgresql_where=text(
+                "desk_id IS NOT NULL AND status IN ('CALLED', 'SERVING')"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

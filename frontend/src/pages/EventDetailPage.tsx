@@ -8,7 +8,7 @@ import { WalkinModal } from '../components/WalkinModal'
 import { IconMapPin, IconMonitor, IconPlus, IconRefresh } from '../components/icons'
 import { CopyButton, EmptyState, Spinner, useConfirm, useToast } from '../components/ui'
 import { formatDateTime, formatLongCountdown, prettyPhone } from '../lib/format'
-import { useLiveState, useTick } from '../lib/useLiveState'
+import { useDebounced, useLiveState, useTick } from '../lib/useLiveState'
 import { PHASE_LABEL } from './EventsPage'
 
 const STATUS_LABEL: Record<TicketStatus, { text: string; tone: string }> = {
@@ -28,6 +28,8 @@ export default function EventDetailPage() {
   const confirm = useConfirm()
   const now = useTick()
   const [search, setSearch] = useState('')
+  // each keystroke would otherwise be a fresh ILIKE across the event's tickets
+  const debouncedSearch = useDebounced(search)
   const [statusFilter, setStatusFilter] = useState('')
   const [branchFilter, setBranchFilter] = useState('')
   const [addingWalkin, setAddingWalkin] = useState(false)
@@ -46,10 +48,10 @@ export default function EventDetailPage() {
     eventId ? () => api<StaffState>(`/events/${eventId}/state`) : null,
   )
   const ticketsQuery = useQuery({
-    queryKey: ['tickets', eventId, search, statusFilter, branchFilter],
+    queryKey: ['tickets', eventId, debouncedSearch, statusFilter, branchFilter],
     queryFn: () =>
       api<Ticket[]>(
-        `/events/${eventId}/tickets?q=${encodeURIComponent(search)}${
+        `/events/${eventId}/tickets?q=${encodeURIComponent(debouncedSearch)}${
           statusFilter ? `&ticket_status=${statusFilter}` : ''
         }${branchFilter ? `&branch_id=${branchFilter}` : ''}`,
       ),

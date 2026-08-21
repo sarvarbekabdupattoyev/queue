@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 from pathlib import Path
 
@@ -147,6 +148,16 @@ async def delete_bot(bot_id: int, db: DbSession, company: OwnCompany) -> None:
     await notify_bot_token_changed(company.id)
 
 
+def _store_logo(
+    directory: Path, filename: str, content: bytes, previous: str | None
+) -> None:
+    """Blocking disk work, kept off the event loop by the caller."""
+    directory.mkdir(parents=True, exist_ok=True)
+    if previous:
+        (directory / previous).unlink(missing_ok=True)
+    (directory / filename).write_bytes(content)
+
+
 @router.post("/logo", response_model=CompanyOut, dependencies=[OwnerOnly])
 async def upload_logo(file: UploadFile, db: DbSession, company: OwnCompany) -> CompanyOut:
     settings = get_settings()
@@ -155,16 +166,16 @@ async def upload_logo(file: UploadFile, db: DbSession, company: OwnCompany) -> C
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Logo PNG, JPEG, WebP yoki SVG formatida bo'lishi kerak"
         )
-    content = await file.read()
+    # one byte past the cap is enough to reject: reading the whole body first
+    # let any authenticated owner pull an arbitrarily large upload into memory
+    content = await file.read(settings.max_logo_size + 1)
     if len(content) > settings.max_logo_size:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Logo hajmi 2 MB dan oshmasin")
 
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    if company.logo_path:
-        old = settings.upload_dir / company.logo_path
-        old.unlink(missing_ok=True)
     filename = f"logo-{company.id}-{secrets.token_hex(4)}{extension}"
-    (settings.upload_dir / filename).write_bytes(content)
+    await asyncio.to_thread(
+        _store_logo, settings.upload_dir, filename, content, company.logo_path
+    )
     company.logo_path = filename
     await db.commit()
     return await _company_out(db, company)

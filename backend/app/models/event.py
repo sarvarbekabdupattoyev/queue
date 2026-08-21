@@ -67,8 +67,11 @@ class SaleEvent(Base):
     branches: Mapped[list[Branch]] = relationship(
         secondary=event_branches, order_by=Branch.id, lazy="selectin"
     )
+    # passive_deletes: the FK already cascades in the database, so deleting an
+    # event must not first load every one of its tickets into the session and
+    # delete them row by row (a sale day holds tens of thousands).
     tickets: Mapped[list["Ticket"]] = relationship(  # noqa: F821
-        back_populates="event", cascade="all, delete-orphan"
+        back_populates="event", cascade="all, delete-orphan", passive_deletes=True
     )
 
     def branch_ids(self) -> list[int]:
