@@ -93,7 +93,17 @@ export default function ScannerPage() {
     flashTimer.current = window.setTimeout(() => setFlash(null), FLASH_MS)
   }, [])
 
-  useEffect(() => () => window.clearTimeout(flashTimer.current), [])
+  useEffect(
+    () => () => {
+      window.clearTimeout(flashTimer.current)
+      // release the verdict-tone context: browsers allow only a handful per
+      // page, and a scanner screen is opened and left many times a day
+      const context = audioCtxRef.current
+      audioCtxRef.current = null
+      void context?.close().catch(() => {})
+    },
+    [],
+  )
 
   const submit = useCallback(
     async (raw: string) => {
