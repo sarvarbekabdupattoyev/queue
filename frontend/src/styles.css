@@ -712,8 +712,15 @@ a.btn:hover { text-decoration: none; }
 .display-brand h1 { font: 400 clamp(20px, 3vh, 44px)/1.05 var(--display); letter-spacing: -0.01em; }
 .display-brand small { display: block; font: 500 clamp(11px, 1.5vh, 20px)/1.2 var(--body); color: var(--dsp-dim); margin-top: 0.3vh; letter-spacing: 0.14em; text-transform: uppercase; }
 .display-clock { text-align: right; }
-.display-clock b { display: block; font: 400 clamp(26px, 4.6vh, 68px)/1 var(--display); font-variant-numeric: tabular-nums; }
-.display-clock span { font-size: clamp(11px, 1.5vh, 20px); color: var(--dsp-dim); }
+.display-clock b { display: block; font: 400 clamp(26px, 4.6vh, 84px)/1 var(--display); font-variant-numeric: tabular-nums; }
+.display-clock span { font-size: clamp(11px, 1.5vh, 24px); color: var(--dsp-dim); }
+
+/* compact header stats: brand -> stats -> clock, so counts read before the
+   time does, without the weight of the old card-style stat blocks */
+.display-stats-mini { display: flex; align-items: center; gap: 1.8vw; flex: 0 0 auto; }
+.display-stats-mini div { text-align: center; }
+.display-stats-mini b { display: block; font: 400 clamp(15px, 2.4vh, 38px)/1 var(--display); color: var(--dsp-text); font-variant-numeric: tabular-nums; }
+.display-stats-mini span { display: block; margin-top: 0.2vh; font-size: clamp(8px, 0.9vh, 13px); color: var(--dsp-dim); text-transform: uppercase; letter-spacing: 0.08em; }
 
 .display-main { display: grid; grid-template-columns: 1.6fr 1fr; gap: 1.6vw; min-height: 0; }
 .display-panel { background: var(--dsp-panel); border-radius: 2.4vh; padding: 2vh 2vw; display: flex; flex-direction: column; min-height: 0; }
@@ -747,21 +754,20 @@ a.btn:hover { text-decoration: none; }
 .tile.expired .n { color: var(--dsp-dim); }
 .tile.expired .desk b { color: var(--dsp-coral); }
 
-.display-right { display: grid; grid-template-rows: 1fr auto; gap: 1.6vh; min-height: 0; }
-.next-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1vh 1.4vw; align-content: start; }
-/* each waiting entry: the 4-letter code, then (smaller) the client's name
-   and the exact bot registration time — the millisecond order on display */
-.next-list .q { background: var(--dsp-panel2); border-radius: 1.6vh; padding: 1.1vh 1vw; text-align: center; display: grid; gap: 0.35vh; min-width: 0; }
-.next-list .q b { font: 400 clamp(22px, 4.4vh, 60px)/1 var(--display); letter-spacing: 0.06em; }
-.next-list .q .q-name { font: 500 clamp(11px, 1.7vh, 22px)/1.2 var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.next-list .q .q-time { font: 500 clamp(10px, 1.4vh, 18px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; }
+.display-right { display: grid; grid-template-rows: 1fr; gap: 1.6vh; min-height: 0; }
+.display-search { width: 100%; max-width: 30vw; background: var(--dsp-panel2); border: 1px solid var(--dsp-line); border-radius: 1vh; padding: 0.7vh 1.2vh; font: 500 clamp(11px, 1.5vh, 18px)/1.2 var(--body); color: var(--dsp-text); }
+.display-search::placeholder { color: var(--dsp-dim); }
+/* single-column, scrollable roster (not a capped grid) so every checked-in
+   client is on screen, ordered exactly as the queue will call them */
+.next-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.7vh; padding-right: 0.4vw; }
+.next-list .q { background: var(--dsp-panel2); border-radius: 1.4vh; padding: 1vh 1.2vw; display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline; gap: 1.2vw; text-align: left; }
+.next-list .q-pos { font: 500 clamp(13px, 1.8vh, 28px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; min-width: 2.2ch; }
+.next-list .q b { font: 400 clamp(20px, 3.2vh, 48px)/1 var(--display); letter-spacing: 0.06em; }
+.next-list .q .q-name { font: 500 clamp(13px, 2.1vh, 32px)/1.2 var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.next-list .q .q-time { font: 500 clamp(11px, 1.6vh, 22px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; text-align: right; }
 .next-list .q:first-child { background: rgba(167, 200, 226, 0.14); outline: 2px solid var(--dsp-accent); }
 .next-list .q.late { background: rgba(232, 211, 168, 0.1); }
 .next-list .q.late b { color: var(--dsp-amber); }
-.display-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1vw; }
-.display-stats .stat { background: var(--dsp-panel2); }
-.display-stats .stat b { font-size: clamp(22px, 4vh, 56px); color: var(--dsp-text); }
-.display-stats .stat span { color: var(--dsp-dim); }
 .display-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--dsp-dim); font-size: clamp(14px, 2.4vh, 34px); line-height: 1.4; }
 .display-foot { display: flex; align-items: center; justify-content: space-between; gap: 2vw; color: var(--dsp-dim); font-size: clamp(11px, 1.7vh, 22px); }
 .display-foot b { color: var(--dsp-text); font-weight: 600; }
@@ -781,8 +787,9 @@ a.btn:hover { text-decoration: none; }
   .display-main { grid-template-columns: 1fr; gap: 12px; }
   .tiles { grid-template-columns: 1fr; }
   .display-panel { padding: 14px; border-radius: var(--r-lg); }
-  .display-stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .next-list { gap: 8px; }
+  .display-stats-mini { gap: 14px; }
+  .next-list { gap: 8px; overflow-y: visible; }
+  .display-search { max-width: none; }
   .display-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
   .display-brand img { height: 34px; }
 }

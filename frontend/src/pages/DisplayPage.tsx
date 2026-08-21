@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { wsUrl } from '../api/client'
-import { IconExpand, IconSound } from '../components/icons'
+import { IconExpand } from '../components/icons'
 import type { PublicState } from '../api/types'
 import { UZ_DAYS, UZ_MONTHS, formatCountdown, formatLongCountdown, formatTimeMs } from '../lib/format'
 import { useCallSound } from '../lib/useCallSound'
@@ -45,11 +45,16 @@ export default function DisplayPage() {
     displayCode ? wsUrl(`/ws/display/${displayCode}`) : null,
     displayCode ? () => fetchState(displayCode) : null,
   )
-  // the loud announcement clip (shared with the manager panel); TVs keep
-  // their own persisted on/off choice
-  const { enabled: soundOn, toggle: toggleSound, play: playCallSound } = useCallSound(false, 'sn_display_sound')
+  // the loud announcement clip (shared with the manager panel); always on
+  // for the TV board — no operator is there to flip a toggle back on
+  const { enabled: soundOn, toggle: toggleSound, play: playCallSound } = useCallSound(true, 'sn_display_sound')
+  useEffect(() => {
+    if (!soundOn) toggleSound()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const knownCalls = useRef<Set<string>>(new Set())
   const sawFirstState = useRef(false)
+  const [search, setSearch] = useState('')
 
   // fresh-call detection for pulse + sound
   const freshKeys = useMemo(() => {
@@ -117,6 +122,12 @@ export default function DisplayPage() {
     .slice(0, 6)
   const next = branchSection ? branchSection.next : state.next
   const stats = branchSection ? branchSection.stats : state.stats
+  const query = search.trim().toLowerCase()
+  const visibleNext = query
+    ? next.filter(
+        (entry) => entry.number.toLowerCase().includes(query) || entry.name.toLowerCase().includes(query),
+      )
+    : next
 
   if (branchMissing) {
     return (
@@ -142,6 +153,24 @@ export default function DisplayPage() {
               {state.event.name}
               {branchSection ? ` · ${branchSection.name}` : ''} · Onlayn navbat
             </small>
+          </div>
+        </div>
+        <div className="display-stats-mini">
+          <div>
+            <b>{stats.registered}</b>
+            <span>Yozilgan</span>
+          </div>
+          <div>
+            <b>{stats.arrived}</b>
+            <span>Kelgan</span>
+          </div>
+          <div>
+            <b>{stats.waiting}</b>
+            <span>Kutmoqda</span>
+          </div>
+          <div>
+            <b>{stats.done}</b>
+            <span>Yakunlandi</span>
           </div>
         </div>
         <div className="display-clock">
@@ -225,16 +254,30 @@ export default function DisplayPage() {
               <span>Keyingi navbat{branchSection ? ` · ${branchSection.name}` : ''}</span>
               <span className="cnt">{stats.waiting ? `${stats.waiting} kishi` : ''}</span>
             </div>
+            {next.length > 0 && (
+              <input
+                className="display-search"
+                style={{ marginBottom: '1.2vh' }}
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Kod yoki F.I.Sh bo‘yicha qidirish"
+                aria-label="Navbatdan qidirish"
+              />
+            )}
             {next.length === 0 ? (
               <div className="display-empty">
                 Navbatda hech kim yo‘q.
                 <br />
                 Kelganingizni qabulxonada belgilating.
               </div>
+            ) : visibleNext.length === 0 ? (
+              <div className="display-empty">Hech narsa topilmadi.</div>
             ) : (
               <div className="next-list">
-                {next.slice(0, 8).map((entry) => (
+                {visibleNext.map((entry, i) => (
                   <div key={entry.number} className={`q${entry.late ? ' late' : ''}`}>
+                    <span className="q-pos">{i + 1}</span>
                     <b>{entry.number}</b>
                     <span className="q-name">{entry.name}</span>
                     <span className="q-time">{formatTimeMs(entry.registered_at)}</span>
@@ -242,26 +285,6 @@ export default function DisplayPage() {
                 ))}
               </div>
             )}
-          </section>
-          <section className="display-panel" style={{ padding: '1.6vh 1.6vw' }}>
-            <div className="display-stats">
-              <div className="stat">
-                <b>{stats.registered}</b>
-                <span>Yozilgan</span>
-              </div>
-              <div className="stat">
-                <b>{stats.arrived}</b>
-                <span>Kelgan</span>
-              </div>
-              <div className="stat">
-                <b>{stats.waiting}</b>
-                <span>Kutmoqda</span>
-              </div>
-              <div className="stat">
-                <b>{stats.done}</b>
-                <span>Yakunlandi</span>
-              </div>
-            </div>
           </section>
         </div>
       </main>
@@ -273,9 +296,6 @@ export default function DisplayPage() {
           oxirida qabul qilinadi
         </div>
         <div style={{ display: 'flex', gap: '0.6vw' }}>
-          <button className={`btn ghost sm${soundOn ? ' on' : ''}`} onClick={toggleSound}>
-            <IconSound size={15} /> Ovoz
-          </button>
           <button className="btn ghost sm" onClick={toggleFullscreen}>
             <IconExpand size={15} /> To‘liq ekran (F)
           </button>

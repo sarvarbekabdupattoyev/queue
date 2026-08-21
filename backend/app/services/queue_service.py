@@ -40,6 +40,11 @@ log = logging.getLogger(__name__)
 
 TASHKENT = ZoneInfo("Asia/Tashkent")
 
+# The TV board lists every waiting client, not a top-N sample -- this bounds
+# the payload against a pathological single event without behaving like a
+# cap for any realistic one-office queue.
+DISPLAY_ROSTER_LIMIT = 500
+
 
 def fmt_local(dt: datetime) -> str:
     return dt.astimezone(TASHKENT).strftime("%H:%M (%d.%m.%Y)")
@@ -300,7 +305,7 @@ async def build_states(
         return {
             "id": branch_id,
             "name": branch_names.get(branch_id, ""),
-            "next": [queue_entry(t) for t in mine[:12]],
+            "next": [queue_entry(t) for t in mine[:DISPLAY_ROSTER_LIMIT]],
             "stats": branch_stats.get(branch_id, _stats_from()),
         }
 
@@ -325,7 +330,7 @@ async def build_states(
             }
             for t in active
         ],
-        "next": [queue_entry(t) for t in waiting[:12]],
+        "next": [queue_entry(t) for t in waiting[:DISPLAY_ROSTER_LIMIT]],
         "by_branch": [{**s, "stats": public_stats(s["stats"])} for s in staff_by_branch],
         "stats": public_stats(stats),
     }
@@ -563,27 +568,15 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
     if busy is not None:
         raise ConflictError("Bu stolda hali mijoz bor — avval yakunlang yoki o'tkazib yuboring")
 
+    ticket = await db.scalar(_waiting_stmt(event.id, branch_scope).limit(1))
+    if ticket is None:
+        return None
     settings = get_settings()
-    while True:
-        ticket = await db.scalar(_waiting_stmt(event.id, branch_scope).limit(1))
-        if ticket is None:
-            return None
-        # Two desks calling next at once can both select the same waiting
-        # ticket — claim it the same way check_in claims a QR scan (atomic
-        # conditional UPDATE, not a plain attribute assignment) so only one
-        # desk wins; the other simply moves on to the next ticket in line
-        # instead of silently overwriting the winner's desk assignment.
-        won = await _claim_status(
-            db,
-            ticket,
-            TicketStatus.CHECKED_IN,
-            status=TicketStatus.CALLED,
-            desk_id=desk.id,
-            called_at=now_utc(),
-            call_count=Ticket.call_count + 1,
-        )
-        if won:
-            break
+    ticket.status = TicketStatus.CALLED
+    ticket.desk_id = desk.id
+    ticket.called_at = now_utc()
+    ticket.call_count += 1
+    await db.commit()
     schedule_event_broadcast(event.id)
     lang = await _ticket_lang(db, event, ticket)
     await _notify(
