@@ -755,29 +755,39 @@ a.btn:hover { text-decoration: none; }
 .tile.expired .desk b { color: var(--dsp-coral); }
 
 .display-right { display: grid; grid-template-rows: 1fr; gap: 1.6vh; min-height: 0; }
+/* less padding than the standard panel so the roster gets more width for
+   names -- this card is a dense list, not a headline stat */
+.display-right .display-panel { padding: 1.6vh 1vw; }
 .display-search { width: 100%; max-width: 30vw; background: var(--dsp-panel2); border: 1px solid var(--dsp-line); border-radius: 1vh; padding: 0.7vh 1.2vh; font: 500 clamp(11px, 1.5vh, 18px)/1.2 var(--body); color: var(--dsp-text); }
 .display-search::placeholder { color: var(--dsp-dim); }
-/* single-column, scrollable roster (not a capped grid) so every checked-in
-   client is on screen, ordered exactly as the queue will call them */
-.next-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.7vh; padding-right: 0.4vw; }
-/* the code column is a fixed width (not auto) so it lines up the same
-   across every row -- each row is its own independent grid, and "auto"
-   let a wide letter combination (e.g. containing a W) push that one row's
-   name column out of line with the rest */
-.next-list .q { background: var(--dsp-panel2); border-radius: 1.4vh; padding: 0.8vh 0.7vw; display: grid; grid-template-columns: auto 4em 1fr auto; align-items: baseline; gap: 1vw; text-align: left; }
+/* the roster is ONE grid (not a flex column of independent per-row grids):
+   every ".q" row spans it via subgrid, so the code column's width is
+   computed once from whatever is actually on screen and shared by every
+   row -- a fixed em/px guess here previously either clipped a wide code
+   or, sized generously enough not to clip, left it overlapping the name
+   at the small end. Subgrid needs no guessing either way. */
+.next-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: auto auto 1fr auto; align-content: start; gap: 0.6vh 0.8vw; padding-right: 0.4vw; }
+.next-list .q { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; background: var(--dsp-panel2); border-radius: 1.4vh; padding: 0.7vh 0.8vw; align-items: baseline; text-align: left; }
 .next-list .q-pos { font: 500 clamp(13px, 1.8vh, 28px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; min-width: 2.2ch; }
-.next-list .q b { font: 400 clamp(20px, 3.2vh, 48px)/1 var(--display); letter-spacing: 0.06em; }
+.next-list .q b { font: 400 clamp(20px, 3.2vh, 48px)/1 var(--display); letter-spacing: 0.06em; white-space: nowrap; }
 .next-list .q .q-name { font: 500 clamp(13px, 2.1vh, 32px)/1.2 var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.next-list .q .q-time { font: 500 clamp(11px, 1.6vh, 22px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; text-align: right; }
+.next-list .q .q-time { font: 500 clamp(11px, 1.6vh, 22px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .next-list .q:first-child { background: rgba(167, 200, 226, 0.14); outline: 2px solid var(--dsp-accent); }
 .next-list .q.late { background: rgba(232, 211, 168, 0.1); }
 .next-list .q.late b { color: var(--dsp-amber); }
 /* the next few people to be called read larger than the rest of the roster */
-.next-list .q:nth-child(-n+5) { padding: 1.3vh 0.9vw; }
+.next-list .q:nth-child(-n+5) { padding: 1.1vh 0.9vw; }
 .next-list .q:nth-child(-n+5) .q-pos { font-size: clamp(16px, 2.3vh, 34px); }
 .next-list .q:nth-child(-n+5) b { font-size: clamp(26px, 4.2vh, 62px); }
 .next-list .q:nth-child(-n+5) .q-name { font-size: clamp(16px, 2.6vh, 38px); }
 .next-list .q:nth-child(-n+5) .q-time { font-size: clamp(12px, 1.8vh, 24px); }
+/* subgrid landed in every major engine by 2023; on anything older, fall
+   back to a flat guess rather than the broken single-column stack an
+   unsupported "subgrid" value would otherwise leave each row in */
+@supports not (grid-template-columns: subgrid) {
+  .next-list { display: flex; flex-direction: column; }
+  .next-list .q { grid-template-columns: auto 4.5em 1fr auto; }
+}
 .display-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--dsp-dim); font-size: clamp(14px, 2.4vh, 34px); line-height: 1.4; }
 .display-foot { display: flex; align-items: center; justify-content: space-between; gap: 2vw; color: var(--dsp-dim); font-size: clamp(11px, 1.7vh, 22px); }
 .display-foot b { color: var(--dsp-text); font-weight: 600; }
