@@ -217,7 +217,17 @@ export default function EmployeesPage() {
                         </button>
                         <button
                           className="btn ghost sm"
-                          onClick={() => resetPassword.mutate(employee)}
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `${employee.first_name} paroli yangilansinmi?`,
+                                description: 'Eski parol shu zahoti ishlamay qoladi — xodim smenada bo‘lsa, undan oldin xabar bering.',
+                                confirmLabel: 'Yangilash',
+                                tone: 'neutral',
+                              })
+                            )
+                              resetPassword.mutate(employee)
+                          }}
                           disabled={resetPassword.isPending}
                         >
                           Parolni yangilash

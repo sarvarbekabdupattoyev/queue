@@ -12,7 +12,7 @@ import {
   IconSkip,
   IconSound,
 } from '../components/icons'
-import { Modal, useConfirm, useToast } from '../components/ui'
+import { Modal, Spinner, useConfirm, useToast } from '../components/ui'
 import { formatCountdown, formatLongCountdown } from '../lib/format'
 import { useCallSound } from '../lib/useCallSound'
 import { useLiveState, useTick } from '../lib/useLiveState'
@@ -63,7 +63,7 @@ export default function ManagerPage() {
     localStorage.setItem('navbat_desk', String(id))
   }
 
-  const { state } = useLiveState<StaffState>(
+  const { state, connected } = useLiveState<StaffState>(
     eventId ? wsUrl(`/ws/staff/${eventId}?token=${getToken()}`) : null,
     eventId ? () => api<StaffState>(`/events/${eventId}/state`) : null,
   )
@@ -149,6 +149,9 @@ export default function ManagerPage() {
       onEventChange={selectEvent}
       extra={
         <>
+          <span className={`conn-chip${connected ? ' on' : ''}`}>
+            <span className="dot" /> {connected ? 'jonli' : 'ulanmoqda…'}
+          </span>
           <select
             className="input"
             style={{ width: 'auto' }}
@@ -322,7 +325,9 @@ export default function ManagerPage() {
               {branchScope !== null && desk?.branch_name ? ` · ${desk.branch_name}` : ''})
               <span className="aux">{waiting.length ? `${waiting.length} kishi` : ''}</span>
             </div>
-            {waiting.length === 0 ? (
+            {state === null ? (
+              <Spinner />
+            ) : waiting.length === 0 ? (
               <div className="empty">
                 Hozircha hech kim yo‘q — mijozlar qabulxonada QR skanerlatishi kerak
               </div>

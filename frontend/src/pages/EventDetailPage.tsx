@@ -5,8 +5,8 @@ import { api, getToken, wsUrl } from '../api/client'
 import type { SaleEvent, StaffState, Ticket, TicketStatus } from '../api/types'
 import { PageTitle } from '../components/DashboardLayout'
 import { WalkinModal } from '../components/WalkinModal'
-import { IconMapPin, IconMonitor, IconPlus } from '../components/icons'
-import { CopyButton, Spinner, useConfirm, useToast } from '../components/ui'
+import { IconMapPin, IconMonitor, IconPlus, IconRefresh } from '../components/icons'
+import { CopyButton, EmptyState, Spinner, useConfirm, useToast } from '../components/ui'
 import { formatDateTime, formatLongCountdown, prettyPhone } from '../lib/format'
 import { useLiveState, useTick } from '../lib/useLiveState'
 import { PHASE_LABEL } from './EventsPage'
@@ -32,7 +32,12 @@ export default function EventDetailPage() {
   const [branchFilter, setBranchFilter] = useState('')
   const [addingWalkin, setAddingWalkin] = useState(false)
 
-  const { data: event } = useQuery({
+  const {
+    data: event,
+    isLoading: eventLoading,
+    error: eventError,
+    refetch: refetchEvent,
+  } = useQuery({
     queryKey: ['event', eventId],
     queryFn: () => api<SaleEvent>(`/events/${eventId}`),
   })
@@ -94,7 +99,19 @@ export default function EventDetailPage() {
     () => (event ? `${window.location.origin}/display/${event.display_code}` : ''),
     [event],
   )
-  if (!event) return <Spinner />
+  if (eventLoading) return <Spinner />
+  if (eventError || !event)
+    return (
+      <EmptyState
+        action={
+          <button className="btn ghost sm" onClick={() => refetchEvent()}>
+            <IconRefresh size={14} /> Qayta urinish
+          </button>
+        }
+      >
+        Tadbirni yuklab bo‘lmadi. Internetni tekshirib qayta urinib ko‘ring.
+      </EmptyState>
+    )
   const phase = PHASE_LABEL[event.phase]
   const untilSale = new Date(event.sale_starts_at).getTime() - now
   const stats = state?.stats
@@ -350,6 +367,13 @@ export default function EventDetailPage() {
         </div>
         {ticketsQuery.isLoading ? (
           <Spinner />
+        ) : ticketsQuery.error && !ticketsQuery.data ? (
+          <div className="empty">
+            Ro‘yxatni yuklab bo‘lmadi.{' '}
+            <button className="btn ghost sm" onClick={() => ticketsQuery.refetch()}>
+              Qayta urinish
+            </button>
+          </div>
         ) : !ticketsQuery.data?.length ? (
           <div className="empty">Mijozlar topilmadi. Bot orqali ro‘yxatdan o‘tishlarini kuting.</div>
         ) : (

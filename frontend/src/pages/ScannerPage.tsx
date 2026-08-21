@@ -54,7 +54,7 @@ export default function ScannerPage() {
   const flashTimer = useRef<number>()
   const audioCtxRef = useRef<AudioContext | null>(null)
 
-  const { state } = useLiveState<StaffState>(
+  const { state, connected } = useLiveState<StaffState>(
     eventId ? wsUrl(`/ws/staff/${eventId}?token=${getToken()}`) : null,
     eventId ? () => api<StaffState>(`/events/${eventId}/state`) : null,
   )
@@ -211,6 +211,11 @@ export default function ScannerPage() {
       subtitle="Qabulxona: mijoz QR ko‘rsatadi yoki kodini aytadi"
       eventId={eventId}
       onEventChange={selectEvent}
+      extra={
+        <span className={`conn-chip${connected ? ' on' : ''}`}>
+          <span className="dot" /> {connected ? 'jonli' : 'ulanmoqda…'}
+        </span>
+      }
     >
       {() => (
         <div className="grid-2" style={{ alignItems: 'start' }}>

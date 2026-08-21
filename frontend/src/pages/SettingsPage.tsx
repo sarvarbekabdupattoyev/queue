@@ -2,14 +2,16 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { Company } from '../api/types'
-import { ActionForm, Field, Spinner, useToast } from '../components/ui'
+import { ActionForm, EmptyState, Field, Spinner, useConfirm, useToast } from '../components/ui'
 import { useCompany } from '../components/DashboardLayout'
 import { prettyPhone } from '../lib/format'
+import { IconRefresh } from '../components/icons'
 
 export default function SettingsPage() {
-  const { data: company, isLoading } = useCompany()
+  const { data: company, isLoading, error: companyError, refetch } = useCompany()
   const queryClient = useQueryClient()
   const toast = useToast()
+  const confirm = useConfirm()
   const [name, setName] = useState('')
   const [botToken, setBotToken] = useState('')
   const [phoneForm, setPhoneForm] = useState({ phone: '+998', label: '' })
@@ -44,13 +46,27 @@ export default function SettingsPage() {
   const deletePhone = useMutation({
     mutationFn: (id: number) => api(`/company/phones/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+    onError: (e: Error) => toast(e.message, true),
   })
   const deleteLocation = useMutation({
     mutationFn: (id: number) => api(`/company/locations/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+    onError: (e: Error) => toast(e.message, true),
   })
 
-  if (isLoading || !company) return <Spinner />
+  if (isLoading) return <Spinner />
+  if (companyError || !company)
+    return (
+      <EmptyState
+        action={
+          <button className="btn ghost sm" onClick={() => refetch()}>
+            <IconRefresh size={14} /> Qayta urinish
+          </button>
+        }
+      >
+        Ma’lumotlarni yuklab bo‘lmadi. Internetni tekshirib qayta urinib ko‘ring.
+      </EmptyState>
+    )
 
   return (
     <>
@@ -137,11 +153,13 @@ export default function SettingsPage() {
                 </span>
                 <button
                   className="btn danger-ghost sm"
-                  onClick={() => {
+                  onClick={async () => {
                     if (
-                      window.confirm(
-                        `${bot.username ? `@${bot.username}` : 'Bot'} o‘chirilsinmi? U orqali yozilgan mijozlarga xabarlar boshqa bot orqali yetmasligi mumkin.`,
-                      )
+                      await confirm({
+                        title: `${bot.username ? `@${bot.username}` : 'Bot'} o‘chirilsinmi?`,
+                        description:
+                          'U orqali yozilgan mijozlarga xabarlar boshqa bot orqali yetmasligi mumkin.',
+                      })
                     )
                       deleteBot.mutate(bot.id)
                   }}
@@ -197,7 +215,18 @@ export default function SettingsPage() {
               <span>
                 {prettyPhone(phone.phone)} {phone.label && <span className="muted">· {phone.label}</span>}
               </span>
-              <button className="btn ghost sm" onClick={() => deletePhone.mutate(phone.id)}>
+              <button
+                className="btn ghost sm"
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: `${prettyPhone(phone.phone)} o‘chirilsinmi?`,
+                      description: 'Bu raqam botdagi ma’lumot xabarlarida ham ko‘rsatilmay qoladi.',
+                    })
+                  )
+                    deletePhone.mutate(phone.id)
+                }}
+              >
                 O‘chirish
               </button>
             </div>
@@ -251,7 +280,18 @@ export default function SettingsPage() {
                   </a>
                 )}
               </span>
-              <button className="btn ghost sm" onClick={() => deleteLocation.mutate(location.id)}>
+              <button
+                className="btn ghost sm"
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: `«${location.name}» o‘chirilsinmi?`,
+                      description: 'Bu manzil botdagi ma’lumot xabarlarida ham ko‘rsatilmay qoladi.',
+                    })
+                  )
+                    deleteLocation.mutate(location.id)
+                }}
+              >
                 O‘chirish
               </button>
             </div>

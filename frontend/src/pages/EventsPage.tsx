@@ -235,6 +235,21 @@ export default function EventsPage() {
         : [...f.branch_ids, id],
     }))
   }
+  const confirmToggleActive = async (event: SaleEvent) => {
+    if (!event.is_active) {
+      toggleActive.mutate(event) // reopening is the recovery action, no friction needed
+      return
+    }
+    if (
+      await confirm({
+        title: `«${event.name}» yopilsinmi?`,
+        description: 'Ro‘yxatdan o‘tish va QR skanerlash shu zahoti to‘xtaydi. Istalgan payt qayta ochish mumkin.',
+        confirmLabel: 'Yopish',
+        tone: 'neutral',
+      })
+    )
+      toggleActive.mutate(event)
+  }
   const confirmRemove = async (event: SaleEvent) => {
     if (
       await confirm({
@@ -348,7 +363,7 @@ export default function EventsPage() {
                             <button className="btn ghost sm" onClick={() => openEdit(event)}>
                               Tahrirlash
                             </button>
-                            <button className="btn ghost sm" onClick={() => toggleActive.mutate(event)}>
+                            <button className="btn ghost sm" onClick={() => void confirmToggleActive(event)}>
                               {event.is_active ? 'Yopish' : 'Ochish'}
                             </button>
                             <button className="btn danger-ghost sm" onClick={() => void confirmRemove(event)}>
