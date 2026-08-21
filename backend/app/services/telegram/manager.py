@@ -31,6 +31,7 @@ from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import DefaultKeyBuilder, RedisStorage
 from aiogram.types import BotCommand, Update
+from aiogram.utils.token import TokenValidationError
 from sqlalchemy import select, update
 
 from app.core.config import get_settings
@@ -60,18 +61,31 @@ def webhook_secret(bot_db_id: int) -> str:
     return digest[:32]
 
 
+INVALID_TOKEN_MESSAGE = "Telegram bot tokeni yaroqsiz — BotFather'dan tekshiring"
+
+
+def make_bot(token: str) -> Bot:
+    """``Bot()`` rejects a malformed token by raising TokenValidationError,
+    which is not a DomainError — unhandled it turns an owner's typo into a
+    500 instead of the "check the token" message the dashboard expects."""
+    try:
+        return Bot(token=token)
+    except TokenValidationError:
+        raise DomainError(INVALID_TOKEN_MESSAGE) from None
+
+
 async def validate_token(token: str) -> str | None:
     """Stateless token check (used by API workers that never run bots).
     Returns the bot username, None if Telegram is unreachable or disabled,
     and raises DomainError for a token Telegram rejects."""
     if not get_settings().telegram_enabled:
         return None
-    bot = Bot(token=token)
+    bot = make_bot(token)
     try:
         me = await bot.get_me()
         return me.username
     except TelegramUnauthorizedError:
-        raise DomainError("Telegram bot tokeni yaroqsiz — BotFather'dan tekshiring") from None
+        raise DomainError(INVALID_TOKEN_MESSAGE) from None
     except TelegramNetworkError as exc:
         log.warning("Telegram unreachable while validating token: %s", exc)
         return None
@@ -84,7 +98,7 @@ class CompanyBotRunner:
         self.bot_db_id = bot_db_id
         self.company_id = company_id
         self.token = token
-        self.bot = Bot(token=token)
+        self.bot = make_bot(token)
         # single choke point for EVERYTHING this bot sends: paces sends under
         # Telegram's per-token cap and retries on flood control (429)
         self.bot.session.middleware(RateLimitMiddleware())
@@ -127,8 +141,24 @@ class CompanyBotRunner:
                 ),
                 name=f"tg-poll-bot-{self.bot_db_id}",
             )
+            # nobody awaits this task: without a callback a poller that dies
+            # (network, revoked token) leaves the bot silently dead while the
+            # manager still reports it as running
+            self._polling_task.add_done_callback(self._polling_ended)
             log.info("Bot @%s (company %s): polling", me.username, self.company_id)
         return me.username
+
+    def _polling_ended(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.error(
+                "Polling stopped for bot %s (company %s): %r",
+                self.bot_db_id,
+                self.company_id,
+                exc,
+            )
 
     async def feed_update(self, payload: dict) -> None:
         update = Update.model_validate(payload, context={"bot": self.bot})
@@ -155,6 +185,14 @@ class BotManager:
         self._runners: dict[int, CompanyBotRunner] = {}
         self._storage: BaseStorage | None = None
         self._update_semaphore: asyncio.Semaphore | None = None
+        self._dispatch_semaphore: asyncio.Semaphore | None = None
+        # asyncio keeps only weak references to tasks, so anything spawned
+        # fire-and-forget has to be held here or it may be garbage-collected
+        # mid-flight — a silently dropped update or notification
+        self._background: set[asyncio.Task] = set()
+        # one reload per company at a time: two token edits in a row would
+        # otherwise interleave and leave a bot double-started or orphaned
+        self._reload_locks: dict[int, asyncio.Lock] = {}
 
     @property
     def enabled(self) -> bool:
@@ -162,6 +200,12 @@ class BotManager:
 
     def is_running(self, bot_db_id: int) -> bool:
         return bot_db_id in self._runners
+
+    def _spawn(self, coro) -> None:
+        """Run a coroutine in the background, keeping a strong reference."""
+        task = asyncio.get_running_loop().create_task(coro)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     def _get_storage(self) -> BaseStorage:
         """FSM storage shared by all dispatchers. RedisStorage keys include
@@ -249,6 +293,11 @@ class BotManager:
     async def reload_company(self, company_id: int) -> None:
         """Bot service: re-read the company's bots from the DB and converge
         (stop removed/changed runners, start missing ones)."""
+        lock = self._reload_locks.setdefault(company_id, asyncio.Lock())
+        async with lock:
+            await self._reload_company(company_id)
+
+    async def _reload_company(self, company_id: int) -> None:
         from app.db.session import SessionFactory
         from app.models import CompanyBot
 
@@ -282,15 +331,24 @@ class BotManager:
 
     # -------------------------------------------------------------- webhooks ---
 
+    def verify_webhook(self, bot_db_id: int, secret: str) -> bool:
+        """Constant-time check of a webhook's secret header. Unknown bot and
+        wrong secret are indistinguishable to the caller."""
+        if bot_db_id not in self._runners:
+            return False
+        # compare_digest raises TypeError on non-ASCII str input, which would
+        # turn a junk header into an unauthenticated 500 — compare bytes
+        return hmac.compare_digest(
+            secret.encode("utf-8"), webhook_secret(bot_db_id).encode("utf-8")
+        )
+
     async def feed_webhook(self, bot_db_id: int, secret: str, payload: dict) -> bool:
         """Accept a webhook update: ACK Telegram immediately, process in a
         semaphore-bounded background task so a 2000-update burst neither
         blocks the webhook endpoint nor floods the DB pool."""
-        runner = self._runners.get(bot_db_id)
-        if runner is None:
+        if not self.verify_webhook(bot_db_id, secret):
             return False
-        if not hmac.compare_digest(secret, webhook_secret(bot_db_id)):
-            return False
+        runner = self._runners[bot_db_id]
         if self._update_semaphore is None:
             self._update_semaphore = asyncio.Semaphore(
                 get_settings().bot_max_concurrent_updates
@@ -303,7 +361,7 @@ class BotManager:
                 except Exception:
                     log.exception("Failed to process webhook update (bot %s)", bot_db_id)
 
-        asyncio.get_running_loop().create_task(_process())
+        self._spawn(_process())
         return True
 
     # ----------------------------------------------------------- outbound API ---
@@ -344,14 +402,30 @@ class BotManager:
             CH_BOT_CONTROL, lambda data: self.reload_company(data["company_id"])
         )
 
+    async def _dispatch(self, channel: str, handler, data: dict) -> None:
+        """Run one pub/sub handler under the concurrency bound.
+
+        The sale-start burst publishes one message per checked-in client;
+        without a bound every one of them would be an in-flight send at once.
+        """
+        if self._dispatch_semaphore is None:
+            self._dispatch_semaphore = asyncio.Semaphore(
+                get_settings().bot_max_concurrent_updates
+            )
+        async with self._dispatch_semaphore:
+            try:
+                await handler(data)
+            except Exception:
+                log.exception("Handling a message on %s failed", channel)
+
     async def _subscribe_loop(self, channel: str, handler) -> None:
         delay = 1.0
         while True:
             redis = get_redis()
             if redis is None:
                 return
+            pubsub = redis.pubsub()
             try:
-                pubsub = redis.pubsub()
                 await pubsub.subscribe(channel)
                 delay = 1.0
                 async for item in pubsub.listen():
@@ -359,15 +433,21 @@ class BotManager:
                         continue
                     try:
                         data = json.loads(item["data"])
-                        asyncio.get_running_loop().create_task(handler(data))
                     except Exception:
                         log.exception("Bad message on %s", channel)
+                        continue
+                    self._spawn(self._dispatch(channel, handler, data))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 log.warning("%s subscriber lost Redis (%s); retry in %.0fs", channel, exc, delay)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 15.0)
+            finally:
+                # a reconnect otherwise strands the previous subscription's
+                # connection: a flapping Redis leaks one per attempt
+                with suppress(Exception):
+                    await pubsub.aclose()
 
 
 bot_manager = BotManager()

@@ -14,6 +14,11 @@ from app.core.redis import CH_BOT_CONTROL, CH_NOTIFY, get_redis
 
 log = logging.getLogger(__name__)
 
+# asyncio holds only a weak reference to a running task, so a send that nobody
+# awaits can be garbage-collected before it reaches Telegram. Keeping the task
+# here until it finishes is what makes "fire-and-forget" actually deliver.
+_pending: set[asyncio.Task] = set()
+
 
 async def send_telegram_text(
     company_id: int, chat_id: int, text: str, bot_id: int | None = None
@@ -42,9 +47,11 @@ async def send_telegram_text(
     from app.services.telegram.manager import bot_manager
 
     # fire-and-forget: bot_manager.send_text logs failures itself
-    asyncio.get_running_loop().create_task(
+    task = asyncio.get_running_loop().create_task(
         bot_manager.send_text(company_id, chat_id, text, bot_id)
     )
+    _pending.add(task)
+    task.add_done_callback(_pending.discard)
 
 
 async def notify_bot_token_changed(company_id: int) -> None:

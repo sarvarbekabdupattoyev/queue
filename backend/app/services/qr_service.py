@@ -3,6 +3,7 @@ import base64
 import logging
 import multiprocessing
 import os
+from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from io import BytesIO
@@ -114,13 +115,28 @@ def shutdown_qr_pool() -> None:
         _pool = None
 
 
+def _discard_pool(pool: ProcessPoolExecutor) -> None:
+    """Retire the pool that broke — and only that one.
+
+    When a worker dies, every render in flight raises BrokenProcessPool. The
+    first handler clears the pool and the next request builds a fresh one, so
+    an unconditional shutdown from a slower handler would tear down that new,
+    healthy pool and cancel the renders already queued on it.
+    """
+    global _pool
+    if _pool is pool:
+        _pool = None
+    pool.shutdown(wait=False, cancel_futures=True)
+
+
 async def _run_offloaded(func, *args):
     loop = asyncio.get_running_loop()
+    pool = _get_pool()
     try:
-        return await loop.run_in_executor(_get_pool(), func, *args)
+        return await loop.run_in_executor(pool, func, *args)
     except BrokenProcessPool:
         log.warning("QR process pool broke; recreating and falling back to a thread")
-        shutdown_qr_pool()
+        _discard_pool(pool)
         return await asyncio.to_thread(func, *args)
 
 
@@ -132,5 +148,22 @@ async def ticket_qr_png_bytes_async(data: str, label: str, box_size: int = 12) -
     return await _run_offloaded(ticket_qr_png_bytes, data, label, box_size)
 
 
+# A ticket's QR never changes, yet the public ticket page re-renders it on
+# every poll (~40 ms of pool CPU and a fresh base64 blob each time). A small
+# LRU keeps the tickets being looked at right now off the pool entirely.
+_DATA_URL_CACHE_SIZE = 2048
+_data_url_cache: OrderedDict[tuple[str, int], str] = OrderedDict()
+
+
 async def qr_data_url_async(data: str, box_size: int = 8) -> str:
-    return await _run_offloaded(qr_data_url, data, box_size)
+    key = (data, box_size)
+    cached = _data_url_cache.get(key)
+    if cached is not None:
+        _data_url_cache.move_to_end(key)
+        return cached
+    encoded = await _run_offloaded(qr_data_url, data, box_size)
+    _data_url_cache[key] = encoded
+    _data_url_cache.move_to_end(key)
+    while len(_data_url_cache) > _DATA_URL_CACHE_SIZE:
+        _data_url_cache.popitem(last=False)
+    return encoded

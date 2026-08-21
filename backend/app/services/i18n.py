@@ -124,7 +124,7 @@ _T: dict[str, dict[str, str]] = {
     },
     "prestart_no_name_line": {
         "uz": "⏳ <b>Ro'yhatga olish</b> - {opens_date} kuni telegram kanalda bot "
-              "joylashtirilganda ochiladi.\n<b>Sotuv</b> - {sale_time} {sale_date} kuni "
+              "joylashtirilganda ochiladi.\n<b>Sotuv</b> - {sale_date} kuni "
               "{sale_time} dan boshlanadi.",
         "ru": "⏳ <b>Регистрация</b> - откроется {opens_date}, когда бот будет размещён в "
               "телеграм-канале.\n<b>Продажа</b> - начнётся в {sale_time} {sale_date}.",
