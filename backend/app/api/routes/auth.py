@@ -13,6 +13,12 @@ from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserO
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Fixed hash to check a nonexistent phone against, so a bcrypt round always
+# runs -- otherwise a request for a phone with zero accounts returns near-
+# instantly while one with an account takes ~100-200ms, leaking which phones
+# are registered (security.md: login errors must never reveal phone existence).
+_DUMMY_PASSWORD_HASH = "$2b$12$Od7JzNFkPD2O3J1cz2FQnuMGEyC/kRuHPOArEDtgROnHgxjzu8/Um"
+
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, db: DbSession) -> TokenResponse:
@@ -59,6 +65,8 @@ async def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
         )
     ).all()
     user = None
+    if not candidates:
+        await verify_password_async(payload.password, _DUMMY_PASSWORD_HASH)
     for candidate in candidates:
         if await verify_password_async(payload.password, candidate.password_hash):
             user = candidate

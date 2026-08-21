@@ -9,7 +9,8 @@ from sqlalchemy import select
 from app.db.base import now_utc
 from app.db.session import SessionFactory
 from app.models import SaleEvent, Ticket
-from app.services import ticket_service
+from app.models.enums import TicketStatus
+from app.services import queue_service, ticket_service
 from tests.conftest import auth, create_company, event_times, register_owner, started_sale_times
 
 NOW = now_utc
@@ -308,3 +309,49 @@ async def test_events_isolated_between_companies(client):
         f"/api/queue/{event1['id']}/checkin", json={"number": "ABCD"}, headers=auth(token2)
     )
     assert poke.status_code == 404
+
+
+async def test_call_next_skips_a_ticket_another_desk_already_claimed(client, monkeypatch):
+    """Two desks calling next at the same moment can both select the same
+    waiting ticket before either claims it. Force that exact interleaving:
+    let call_next pick t_a, then -- inside its own claim attempt -- have
+    "desk 2" win the row out from under it and report the claim as lost.
+    call_next must retry onto t_b, never overwrite desk 2's assignment."""
+    token, desk_ids = await setup_company(client, desks=2)
+    event = await create_event(client, token)
+    t_a = await make_ticket(event["id"], "+998901000001", -100)
+    t_b = await make_ticket(event["id"], "+998901000002", -50)
+    for t in (t_a, t_b):
+        await client.post(
+            f"/api/queue/{event['id']}/checkin", json={"number": t["number"]}, headers=auth(token)
+        )
+    await close_checkin_window(client, token, event["id"])
+
+    real_claim_status = queue_service._claim_status
+    raced = {"done": False}
+
+    async def claim_but_lose_the_first_race(db, ticket, expected, **values):
+        if not raced["done"] and ticket.id == t_a["id"]:
+            raced["done"] = True
+            async with SessionFactory() as other_db:
+                won_by_desk2 = await other_db.get(Ticket, t_a["id"])
+                won_by_desk2.status = TicketStatus.CALLED
+                won_by_desk2.desk_id = desk_ids[1]
+                won_by_desk2.called_at = now_utc()
+                won_by_desk2.call_count += 1
+                await other_db.commit()
+            return False
+        return await real_claim_status(db, ticket, expected, **values)
+
+    monkeypatch.setattr(queue_service, "_claim_status", claim_but_lose_the_first_race)
+
+    call = await client.post(
+        f"/api/queue/{event['id']}/call", json={"desk_id": desk_ids[0]}, headers=auth(token)
+    )
+    assert call.status_code == 200, call.text
+    assert call.json()["ticket"]["number"] == t_b["number"]
+
+    async with SessionFactory() as db:
+        claimed_by_desk2 = await db.get(Ticket, t_a["id"])
+        assert claimed_by_desk2.desk_id == desk_ids[1]
+        assert claimed_by_desk2.call_count == 1

@@ -132,6 +132,7 @@ async def get_event(db: DbSession, event: CompanyEvent) -> EventOut:
 async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent) -> EventOut:
     if payload.name is not None:
         event.name = payload.name.strip()
+    old_sale_starts_at = event.sale_starts_at
     for field in ("registration_starts_at", "starts_at", "checkin_until", "sale_starts_at"):
         value = getattr(payload, field)
         if value is None:
@@ -140,6 +141,12 @@ async def update_event(payload: EventUpdate, db: DbSession, event: CompanyEvent)
             await db.rollback()
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vaqt mintaqasi ko'rsatilmagan")
         setattr(event, field, value)
+    if event.sale_starts_at != old_sale_starts_at and event.sale_notified:
+        # The one-time "sale started" burst already fired for the old time.
+        # Moving sale_starts_at (postponed, corrected, whatever the reason)
+        # must let it fire again for the new time -- otherwise checked-in
+        # clients simply never get told the sale is on.
+        event.sale_notified = False
     if not check_period_order(
         event.registration_starts_at, event.starts_at, event.checkin_until, event.sale_starts_at
     ):

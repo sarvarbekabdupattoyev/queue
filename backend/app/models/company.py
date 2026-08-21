@@ -33,9 +33,6 @@ class Company(Base):
     locations: Mapped[list["CompanyLocation"]] = relationship(
         back_populates="company", cascade="all, delete-orphan", order_by="CompanyLocation.id"
     )
-    branches: Mapped[list["Branch"]] = relationship(  # noqa: F821
-        back_populates="company", cascade="all, delete-orphan", order_by="Branch.id"
-    )
     bots: Mapped[list["CompanyBot"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",

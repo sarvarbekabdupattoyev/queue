@@ -338,6 +338,43 @@ async def test_sale_start_burst_sends_position_and_ms_time_once(client, monkeypa
     assert "0 kishi" in first and "1 kishi" in second
 
 
+async def test_moving_sale_start_time_reopens_the_notification_burst(client):
+    """Once the one-time burst has fired, editing sale_starts_at to a new
+    moment (postponed, corrected, whatever the reason) must let it fire
+    again for the new time -- otherwise checked-in clients registered under
+    the new time are never told the sale is on."""
+    token, _ = await setup_company(client, desks=0)
+    event = await create_event(client, token)
+    await client.patch(
+        f"/api/events/{event['id']}", json=started_sale_times(), headers=auth(token)
+    )
+
+    async with SessionFactory() as db:
+        ev = await db.get(SaleEvent, event["id"])
+        assert await queue_service.claim_sale_notification(db, ev.id) is True
+
+    unchanged = await client.patch(
+        f"/api/events/{event['id']}", json={"name": "Sotuv kuni 2"}, headers=auth(token)
+    )
+    assert unchanged.status_code == 200
+    async with SessionFactory() as db:
+        ev = await db.get(SaleEvent, event["id"])
+        assert ev.sale_notified is True  # unrelated edits must not reopen it
+
+    new_sale_starts_at = (now_utc() - timedelta(seconds=10)).isoformat()
+    moved = await client.patch(
+        f"/api/events/{event['id']}",
+        json={"sale_starts_at": new_sale_starts_at},
+        headers=auth(token),
+    )
+    assert moved.status_code == 200, moved.text
+
+    async with SessionFactory() as db:
+        ev = await db.get(SaleEvent, event["id"])
+        assert ev.sale_notified is False
+        assert await queue_service.claim_sale_notification(db, ev.id) is True
+
+
 # ------------------------------------------------------- single-use QR ---
 
 async def test_qr_is_single_use(client):

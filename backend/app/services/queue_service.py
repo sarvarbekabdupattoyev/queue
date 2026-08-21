@@ -563,15 +563,27 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
     if busy is not None:
         raise ConflictError("Bu stolda hali mijoz bor — avval yakunlang yoki o'tkazib yuboring")
 
-    ticket = await db.scalar(_waiting_stmt(event.id, branch_scope).limit(1))
-    if ticket is None:
-        return None
     settings = get_settings()
-    ticket.status = TicketStatus.CALLED
-    ticket.desk_id = desk.id
-    ticket.called_at = now_utc()
-    ticket.call_count += 1
-    await db.commit()
+    while True:
+        ticket = await db.scalar(_waiting_stmt(event.id, branch_scope).limit(1))
+        if ticket is None:
+            return None
+        # Two desks calling next at once can both select the same waiting
+        # ticket — claim it the same way check_in claims a QR scan (atomic
+        # conditional UPDATE, not a plain attribute assignment) so only one
+        # desk wins; the other simply moves on to the next ticket in line
+        # instead of silently overwriting the winner's desk assignment.
+        won = await _claim_status(
+            db,
+            ticket,
+            TicketStatus.CHECKED_IN,
+            status=TicketStatus.CALLED,
+            desk_id=desk.id,
+            called_at=now_utc(),
+            call_count=Ticket.call_count + 1,
+        )
+        if won:
+            break
     schedule_event_broadcast(event.id)
     lang = await _ticket_lang(db, event, ticket)
     await _notify(
