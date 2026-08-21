@@ -31,7 +31,7 @@ from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import DefaultKeyBuilder, RedisStorage
 from aiogram.types import BotCommand, Update
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.config import get_settings
 from app.core.redis import CH_BOT_CONTROL, CH_NOTIFY, get_redis
@@ -206,6 +206,20 @@ class BotManager:
             await runner.bot.session.close()
             raise
         self._runners[bot_db_id] = runner
+        # In multi-process mode this runs in the bot service, a different
+        # process from the API request that saved the row -- if that
+        # request's own validate_token() call missed (disabled at the
+        # time, or a transient network blip returning None), the dashboard
+        # would otherwise show "not started" forever for a bot that is, as
+        # of this line, actually running. Keep the stored username honest.
+        from app.db.session import SessionFactory
+        from app.models import CompanyBot
+
+        async with SessionFactory() as session:
+            await session.execute(
+                update(CompanyBot).where(CompanyBot.id == bot_db_id).values(username=username)
+            )
+            await session.commit()
         return username
 
     async def _stop_runner(self, bot_db_id: int) -> None:

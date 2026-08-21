@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.base import now_utc
 from app.db.session import SessionFactory
-from app.models import BotUser, Company, SaleEvent, TicketStatus
+from app.models import BotUser, Company, CompanyBot, SaleEvent, TicketStatus
 from app.services import i18n, notify, queue_service, ticket_service
 from app.services.i18n import _T, t
 from app.services.telegram.handlers import (
@@ -21,6 +21,7 @@ from app.services.telegram.handlers import (
     build_info_text,
     split_full_name,
 )
+from app.services.telegram.manager import CompanyBotRunner, bot_manager
 from tests.conftest import auth, create_company, event_times, register_owner
 
 NOW = now_utc
@@ -250,3 +251,36 @@ async def test_bot_answers_with_prestart_card_before_registration_opens(client):
             assert t(lang, "prestart_how") in text
             assert "Bosh ofis" in text
             assert "+998 71 200 50 50" in text
+
+
+async def test_bot_service_persists_resolved_username_on_start(client, monkeypatch):
+    """The bot service (start_all/reload_company) runs in a separate process
+    from whatever API request originally saved the row. If that request's
+    own validate_token() call missed (Telegram disabled at the time, or a
+    network blip), the dashboard must not be stuck forever showing "not
+    started" for a bot the service is, right now, actually running."""
+    token = (await register_owner(client))["access_token"]
+    await create_company(client, token)
+
+    async with SessionFactory() as db:
+        company = (await db.scalars(select(Company))).one()
+        bot_row = CompanyBot(company_id=company.id, token="123456789:FAKE-TOKEN")
+        db.add(bot_row)
+        await db.commit()
+        await db.refresh(bot_row)
+        bot_id, company_id, bot_token = bot_row.id, bot_row.company_id, bot_row.token
+
+    async def fake_start(self):
+        self.username = "resolved_username"
+        return "resolved_username"
+
+    monkeypatch.setattr(CompanyBotRunner, "start", fake_start)
+    try:
+        username = await bot_manager._start_runner(bot_id, company_id, bot_token)
+        assert username == "resolved_username"
+
+        async with SessionFactory() as db:
+            refreshed = await db.get(CompanyBot, bot_id)
+            assert refreshed.username == "resolved_username"
+    finally:
+        await bot_manager._stop_runner(bot_id)
