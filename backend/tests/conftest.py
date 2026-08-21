@@ -11,6 +11,13 @@ os.environ["TELEGRAM_ENABLED"] = "0"
 os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL", f"sqlite+aiosqlite:///{_TMP / 'test.db'}"
 )
+# Default: no Redis (single-process/embedded code paths). Without this, a
+# real REDIS_URL already present in the process environment (e.g. running
+# the suite inside a deployed container) leaks into every test — the
+# embedded-mode assertions then silently exercise the Redis branch instead
+# and fail/flake depending on the shared client's state. Set TEST_REDIS_URL
+# to run the suite against a real Redis instead.
+os.environ["REDIS_URL"] = os.environ.get("TEST_REDIS_URL", "")
 os.environ["UPLOAD_DIR"] = str(_TMP / "uploads")
 os.environ["SECRET_KEY"] = "test-secret"
 os.environ["BROADCAST_DEBOUNCE_MS"] = "50"
@@ -20,6 +27,7 @@ from datetime import timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.redis import close_redis
 from app.db.base import Base, now_utc
 from app.db.session import engine
 from app.main import app
@@ -40,6 +48,9 @@ async def _fresh_db():
     # loop to the next test — fatal with asyncpg. Drop pooled connections
     # while their loop is still alive.
     await engine.dispose()
+    # Same problem for the cached Redis client (app/core/redis.py): a client
+    # opened on this test's loop must not survive into the next test's loop.
+    await close_redis()
 
 
 @pytest.fixture

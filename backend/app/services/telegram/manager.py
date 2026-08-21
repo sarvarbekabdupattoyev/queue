@@ -62,8 +62,10 @@ def webhook_secret(bot_db_id: int) -> str:
 
 async def validate_token(token: str) -> str | None:
     """Stateless token check (used by API workers that never run bots).
-    Returns the bot username, None if Telegram is unreachable, and raises
-    DomainError for a token Telegram rejects."""
+    Returns the bot username, None if Telegram is unreachable or disabled,
+    and raises DomainError for a token Telegram rejects."""
+    if not get_settings().telegram_enabled:
+        return None
     bot = Bot(token=token)
     try:
         me = await bot.get_me()

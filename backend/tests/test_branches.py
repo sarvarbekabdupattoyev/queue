@@ -1,11 +1,12 @@
 """Branch ("filial") rules: one event in many branches, branch-scoped
-managers/desks/queues, and the multi-bot (up to 3) company setup."""
+managers/desks/queues, and the multi-bot (up to MAX_BOTS_PER_COMPANY) company
+setup."""
 
 from datetime import timedelta
 
 from app.db.base import now_utc
 from app.db.session import SessionFactory
-from app.models import SaleEvent
+from app.models import MAX_BOTS_PER_COMPANY, SaleEvent
 from app.services import ticket_service
 from app.services.errors import DomainError
 from tests.conftest import auth, create_company, event_times, register_owner, started_sale_times
@@ -369,15 +370,15 @@ async def test_event_branch_validation_and_removal_guard(client):
     assert gone.status_code == 204
 
 
-async def test_company_connects_up_to_three_bots(client):
+async def test_company_connects_up_to_max_bots(client):
     token = (await register_owner(client))["access_token"]
     await create_company(client, token)
 
     bot_ids = []
-    for i in range(2):
+    for i in range(MAX_BOTS_PER_COMPANY - 1):
         response = await client.post(
             "/api/company/bots",
-            json={"token": f"12345678{i}:TEST-TOKEN-{i}"},
+            json={"token": f"1234567{i:02d}:TEST-TOKEN-{i}"},
             headers=auth(token),
         )
         assert response.status_code == 201, response.text
@@ -385,30 +386,30 @@ async def test_company_connects_up_to_three_bots(client):
 
     # the same token cannot be connected twice (unique constraint, not count)
     duplicate = await client.post(
-        "/api/company/bots", json={"token": "123456780:TEST-TOKEN-0"}, headers=auth(token)
+        "/api/company/bots", json={"token": "123456700:TEST-TOKEN-0"}, headers=auth(token)
     )
     assert duplicate.status_code == 409
 
-    third = await client.post(
-        "/api/company/bots", json={"token": "123456782:TEST-TOKEN-2"}, headers=auth(token)
+    last = await client.post(
+        "/api/company/bots", json={"token": "123456799:TEST-TOKEN-LAST"}, headers=auth(token)
     )
-    assert third.status_code == 201
-    bot_ids.append(third.json()["id"])
+    assert last.status_code == 201
+    bot_ids.append(last.json()["id"])
 
-    fourth = await client.post(
+    over_cap = await client.post(
         "/api/company/bots", json={"token": "999999999:TEST-TOKEN-9"}, headers=auth(token)
     )
-    assert fourth.status_code == 409
+    assert over_cap.status_code == 409
 
     company = (await client.get("/api/company", headers=auth(token))).json()
-    assert len(company["bots"]) == 3
-    assert company["max_bots"] == 3
+    assert len(company["bots"]) == MAX_BOTS_PER_COMPANY
+    assert company["max_bots"] == MAX_BOTS_PER_COMPANY
     assert company["has_bot_token"] is True
 
     dropped = await client.delete(f"/api/company/bots/{bot_ids[0]}", headers=auth(token))
     assert dropped.status_code == 204
     company = (await client.get("/api/company", headers=auth(token))).json()
-    assert len(company["bots"]) == 2
+    assert len(company["bots"]) == MAX_BOTS_PER_COMPANY - 1
 
     # another company cannot delete our bot
     token2 = (await register_owner(client, phone="+998907777777"))["access_token"]
