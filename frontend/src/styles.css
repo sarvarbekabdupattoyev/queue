@@ -760,7 +760,11 @@ a.btn:hover { text-decoration: none; }
 /* single-column, scrollable roster (not a capped grid) so every checked-in
    client is on screen, ordered exactly as the queue will call them */
 .next-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.7vh; padding-right: 0.4vw; }
-.next-list .q { background: var(--dsp-panel2); border-radius: 1.4vh; padding: 1vh 1.2vw; display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline; gap: 1.2vw; text-align: left; }
+/* the code column is a fixed width (not auto) so it lines up the same
+   across every row -- each row is its own independent grid, and "auto"
+   let a wide letter combination (e.g. containing a W) push that one row's
+   name column out of line with the rest */
+.next-list .q { background: var(--dsp-panel2); border-radius: 1.4vh; padding: 0.8vh 0.7vw; display: grid; grid-template-columns: auto 4em 1fr auto; align-items: baseline; gap: 1vw; text-align: left; }
 .next-list .q-pos { font: 500 clamp(13px, 1.8vh, 28px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; min-width: 2.2ch; }
 .next-list .q b { font: 400 clamp(20px, 3.2vh, 48px)/1 var(--display); letter-spacing: 0.06em; }
 .next-list .q .q-name { font: 500 clamp(13px, 2.1vh, 32px)/1.2 var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -768,6 +772,12 @@ a.btn:hover { text-decoration: none; }
 .next-list .q:first-child { background: rgba(167, 200, 226, 0.14); outline: 2px solid var(--dsp-accent); }
 .next-list .q.late { background: rgba(232, 211, 168, 0.1); }
 .next-list .q.late b { color: var(--dsp-amber); }
+/* the next few people to be called read larger than the rest of the roster */
+.next-list .q:nth-child(-n+5) { padding: 1.3vh 0.9vw; }
+.next-list .q:nth-child(-n+5) .q-pos { font-size: clamp(16px, 2.3vh, 34px); }
+.next-list .q:nth-child(-n+5) b { font-size: clamp(26px, 4.2vh, 62px); }
+.next-list .q:nth-child(-n+5) .q-name { font-size: clamp(16px, 2.6vh, 38px); }
+.next-list .q:nth-child(-n+5) .q-time { font-size: clamp(12px, 1.8vh, 24px); }
 .display-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--dsp-dim); font-size: clamp(14px, 2.4vh, 34px); line-height: 1.4; }
 .display-foot { display: flex; align-items: center; justify-content: space-between; gap: 2vw; color: var(--dsp-dim); font-size: clamp(11px, 1.7vh, 22px); }
 .display-foot b { color: var(--dsp-text); font-weight: 600; }

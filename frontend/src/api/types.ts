@@ -64,6 +64,7 @@ export interface Company {
   id: number
   name: string
   logo_url: string | null
+  call_timeout_minutes: number
   bots: CompanyBot[]
   max_bots: number
   telegram_bot_username: string | null

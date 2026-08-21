@@ -58,6 +58,7 @@ async def _company_out(db: DbSession, company: Company) -> CompanyOut:
         id=loaded.id,
         name=loaded.name,
         logo_url=f"/media/{loaded.logo_path}" if loaded.logo_path else None,
+        call_timeout_minutes=loaded.call_timeout_minutes,
         bots=bots,
         max_bots=MAX_BOTS_PER_COMPANY,
         has_bot_token=bool(bots),
@@ -71,7 +72,11 @@ async def _company_out(db: DbSession, company: Company) -> CompanyOut:
 async def create_company(payload: CompanyCreate, db: DbSession, user: CurrentUser) -> CompanyOut:
     if user.company_id is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Sizda allaqachon kompaniya bor")
-    company = Company(name=payload.name.strip(), owner_id=user.id)
+    company = Company(
+        name=payload.name.strip(),
+        owner_id=user.id,
+        call_timeout_minutes=get_settings().call_timeout_minutes,
+    )
     db.add(company)
     await db.flush()
     user.company_id = company.id
@@ -88,6 +93,8 @@ async def get_company(db: DbSession, company: OwnCompany) -> CompanyOut:
 async def update_company(payload: CompanyUpdate, db: DbSession, company: OwnCompany) -> CompanyOut:
     if payload.name is not None:
         company.name = payload.name.strip()
+    if payload.call_timeout_minutes is not None:
+        company.call_timeout_minutes = payload.call_timeout_minutes
     await db.commit()
     return await _company_out(db, company)
 

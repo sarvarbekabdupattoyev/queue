@@ -10,6 +10,7 @@ class CompanyCreate(BaseModel):
 
 class CompanyUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
+    call_timeout_minutes: int | None = Field(default=None, ge=1, le=60)
 
 
 class CompanyBotCreate(BaseModel):
@@ -56,6 +57,7 @@ class CompanyOut(BaseModel):
     id: int
     name: str
     logo_url: str | None = None
+    call_timeout_minutes: int
     # up to MAX_BOTS_PER_COMPANY parallel bots (tokens never leave the server)
     bots: list[CompanyBotOut] = []
     max_bots: int = MAX_BOTS_PER_COMPANY

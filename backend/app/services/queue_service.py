@@ -20,7 +20,6 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.db.base import now_utc
 from app.models import (
     LATE_ORDER_BASE,
@@ -287,7 +286,6 @@ async def build_states(
     active = await active_tickets(db, event.id)
     desk_numbers = await desk_numbers_for(db, active)
     stats, branch_stats = await _stats_by_branch(db, event.id)
-    settings = get_settings()
 
     def queue_entry(t: Ticket) -> dict[str, Any]:
         """What the TV board shows per waiting ticket: the 4-letter code, the
@@ -318,7 +316,7 @@ async def build_states(
         "type": "state",
         "event": _event_info(event, company),
         "now": now_utc().isoformat(),
-        "call_timeout_minutes": settings.call_timeout_minutes,
+        "call_timeout_minutes": company.call_timeout_minutes,
         "called": [
             {
                 "number": t.number,
@@ -568,17 +566,29 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
     if busy is not None:
         raise ConflictError("Bu stolda hali mijoz bor — avval yakunlang yoki o'tkazib yuboring")
 
-    ticket = await db.scalar(_waiting_stmt(event.id, branch_scope).limit(1))
-    if ticket is None:
-        return None
-    settings = get_settings()
-    ticket.status = TicketStatus.CALLED
-    ticket.desk_id = desk.id
-    ticket.called_at = now_utc()
-    ticket.call_count += 1
-    await db.commit()
+    while True:
+        ticket = await db.scalar(_waiting_stmt(event.id, branch_scope).limit(1))
+        if ticket is None:
+            return None
+        # Two desks calling next at once can both select the same waiting
+        # ticket — claim it the same way check_in claims a QR scan (atomic
+        # conditional UPDATE, not a plain attribute assignment) so only one
+        # desk wins; the other simply moves on to the next ticket in line
+        # instead of silently overwriting the winner's desk assignment.
+        won = await _claim_status(
+            db,
+            ticket,
+            TicketStatus.CHECKED_IN,
+            status=TicketStatus.CALLED,
+            desk_id=desk.id,
+            called_at=now_utc(),
+            call_count=Ticket.call_count + 1,
+        )
+        if won:
+            break
     schedule_event_broadcast(event.id)
     lang = await _ticket_lang(db, event, ticket)
+    company = await db.get(Company, event.company_id)
     await _notify(
         event,
         ticket,
@@ -587,7 +597,7 @@ async def call_next(db: AsyncSession, event: SaleEvent, desk: Desk) -> Ticket | 
             "ntf_called",
             number=ticket.number,
             desk=desk.number,
-            minutes=settings.call_timeout_minutes,
+            minutes=company.call_timeout_minutes,
         ),
     )
     return ticket

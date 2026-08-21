@@ -13,12 +13,16 @@ export default function SettingsPage() {
   const toast = useToast()
   const confirm = useConfirm()
   const [name, setName] = useState('')
+  const [callTimeout, setCallTimeout] = useState(10)
   const [botToken, setBotToken] = useState('')
   const [phoneForm, setPhoneForm] = useState({ phone: '+998', label: '' })
   const [locationForm, setLocationForm] = useState({ name: '', address: '', map_url: '' })
 
   useEffect(() => {
-    if (company) setName(company.name)
+    if (company) {
+      setName(company.name)
+      setCallTimeout(company.call_timeout_minutes)
+    }
   }, [company])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['company'] })
@@ -81,7 +85,10 @@ export default function SettingsPage() {
           <div className="card-title">Kompaniya</div>
           <ActionForm
             onSubmit={async () => {
-              await api<Company>('/company', { method: 'PATCH', body: { name } })
+              await api<Company>('/company', {
+                method: 'PATCH',
+                body: { name, call_timeout_minutes: callTimeout },
+              })
               invalidate()
               toast('Saqlandi')
             }}
@@ -90,6 +97,18 @@ export default function SettingsPage() {
               <>
                 <Field label="Kompaniya nomi">
                   <input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
+                </Field>
+                <Field label="Chaqirilgandan keyin stolga kelish muddati (daqiqa)">
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={callTimeout}
+                    onChange={(e) => setCallTimeout(Number(e.target.value))}
+                    required
+                    style={{ width: 120 }}
+                  />
                 </Field>
                 {error && <div className="error-text">{error}</div>}
                 <button className="btn" disabled={busy}>

@@ -18,6 +18,10 @@ os.environ["DATABASE_URL"] = os.environ.get(
 # and fail/flake depending on the shared client's state. Set TEST_REDIS_URL
 # to run the suite against a real Redis instead.
 os.environ["REDIS_URL"] = os.environ.get("TEST_REDIS_URL", "")
+# Same reasoning: pin every other operator-tunable env value tests assert
+# exact numbers against, so running inside a deployed container (which has
+# its own real CALL_TIMEOUT_MINUTES etc.) can never change what a test sees.
+os.environ["CALL_TIMEOUT_MINUTES"] = "3"
 os.environ["UPLOAD_DIR"] = str(_TMP / "uploads")
 os.environ["SECRET_KEY"] = "test-secret"
 os.environ["BROADCAST_DEBOUNCE_MS"] = "50"

@@ -10,7 +10,7 @@ from app.db.base import now_utc
 from app.db.session import SessionFactory
 from app.models import SaleEvent, Ticket
 from app.models.enums import TicketStatus
-from app.services import queue_service, ticket_service
+from app.services import notify, queue_service, ticket_service
 from tests.conftest import auth, create_company, event_times, register_owner, started_sale_times
 
 NOW = now_utc
@@ -355,3 +355,38 @@ async def test_call_next_skips_a_ticket_another_desk_already_claimed(client, mon
         claimed_by_desk2 = await db.get(Ticket, t_a["id"])
         assert claimed_by_desk2.desk_id == desk_ids[1]
         assert claimed_by_desk2.call_count == 1
+
+
+async def test_call_next_notifies_with_the_companys_own_timeout(client, monkeypatch):
+    """call_timeout_minutes is per-company now, not the global default --
+    the call notification must say the number the owner actually set."""
+    token, desk_ids = await setup_company(client, desks=1)
+    changed = await client.patch(
+        "/api/company", json={"call_timeout_minutes": 21}, headers=auth(token)
+    )
+    assert changed.status_code == 200, changed.text
+
+    event = await create_event(client, token)
+    ticket = await make_ticket(event["id"], "+998901000001", -60)
+    async with SessionFactory() as db:
+        db_ticket = await db.get(Ticket, ticket["id"])
+        db_ticket.telegram_chat_id = 12345
+        await db.commit()
+    await client.post(
+        f"/api/queue/{event['id']}/checkin", json={"number": ticket["number"]}, headers=auth(token)
+    )
+    await close_checkin_window(client, token, event["id"])
+
+    sent: list[str] = []
+
+    async def fake_send(company_id, chat_id, text, bot_id=None):
+        sent.append(text)
+
+    monkeypatch.setattr(notify, "send_telegram_text", fake_send)
+
+    call = await client.post(
+        f"/api/queue/{event['id']}/call", json={"desk_id": desk_ids[0]}, headers=auth(token)
+    )
+    assert call.status_code == 200, call.text
+    assert len(sent) == 1
+    assert "21" in sent[0]

@@ -21,6 +21,10 @@ class Company(Base):
         ForeignKey("users.id", ondelete="CASCADE", use_alter=True, name="fk_company_owner")
     )
     logo_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Minutes a called client has to reach the desk before being skipped.
+    # Owner-editable (Settings); create_company seeds it from the operator's
+    # CALL_TIMEOUT_MINUTES default, this 10 is only a last-resort fallback.
+    call_timeout_minutes: Mapped[int] = mapped_column(default=10)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=now_utc)
 
     owner: Mapped["User"] = relationship(foreign_keys=[owner_id])  # noqa: F821

@@ -54,6 +54,7 @@ async def create_schema() -> None:
         await _drop_stale_constraints(conn)
         await _migrate_single_branch_events(conn)
         await _migrate_company_bot_tokens(conn)
+        await _migrate_call_timeout_minutes(conn)
 
 
 # Columns added to tables that already existed in earlier deployments.
@@ -137,6 +138,36 @@ async def _migrate_company_bot_tokens(conn) -> None:
             "  AND NOT EXISTS (SELECT 1 FROM company_bots b WHERE b.company_id = c.id) "
             "  AND NOT EXISTS (SELECT 1 FROM company_bots b WHERE b.token = c.telegram_bot_token)"
         )
+    )
+
+
+async def _migrate_call_timeout_minutes(conn) -> None:
+    """call_timeout_minutes used to be one global CALL_TIMEOUT_MINUTES env
+    value shared by every company; each company now owns its own (Settings).
+    A brand-new column would otherwise silently reset every existing
+    company to the schema default (10) the moment this ships -- companies
+    already relying on the env value (whatever it happened to be on this
+    deployment) get that exact value carried over instead, once, here. Never
+    runs again once the column exists, so it can never clobber an owner's
+    later customization."""
+    if engine.dialect.name == "postgresql":
+        has_column = await conn.scalar(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'companies' AND column_name = 'call_timeout_minutes'"
+            )
+        )
+    else:
+        columns = (await conn.execute(text("PRAGMA table_info(companies)"))).all()
+        has_column = any(row[1] == "call_timeout_minutes" for row in columns)
+    if has_column:
+        return
+    await conn.execute(
+        text("ALTER TABLE companies ADD COLUMN call_timeout_minutes INTEGER NOT NULL DEFAULT 10")
+    )
+    await conn.execute(
+        text("UPDATE companies SET call_timeout_minutes = :v"),
+        {"v": get_settings().call_timeout_minutes},
     )
 
 

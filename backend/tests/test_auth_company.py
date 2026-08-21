@@ -46,16 +46,29 @@ async def test_company_lifecycle(client):
     token = (await register_owner(client))["access_token"]
     company = await create_company(client, token)
     assert company["name"] == "Bahor City"
+    # seeded from the operator's CALL_TIMEOUT_MINUTES default (3 in tests);
+    # from here it is entirely the owner's to change
+    assert company["call_timeout_minutes"] == 3
 
     # only one company per owner
     again = await client.post("/api/company", json={"name": "X Corp"}, headers=auth(token))
     assert again.status_code == 409
 
     renamed = await client.patch(
-        "/api/company", json={"name": "Bahor City Group"}, headers=auth(token)
+        "/api/company",
+        json={"name": "Bahor City Group", "call_timeout_minutes": 10},
+        headers=auth(token),
     )
     assert renamed.status_code == 200
     assert renamed.json()["name"] == "Bahor City Group"
+    assert renamed.json()["call_timeout_minutes"] == 10
+
+    out_of_range = await client.patch(
+        "/api/company", json={"call_timeout_minutes": 0}, headers=auth(token)
+    )
+    assert out_of_range.status_code == 422
+    still = await client.get("/api/company", headers=auth(token))
+    assert still.json()["call_timeout_minutes"] == 10  # rejected value never applied
 
     phone = await client.post(
         "/api/company/phones",
