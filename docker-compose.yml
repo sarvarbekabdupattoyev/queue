@@ -67,8 +67,16 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "${HTTP_PORT:-80}:80"
+    # No default port publishing here on purpose: prod.yml publishes 80/443
+    # explicitly, dev.yml publishes nothing (dev.conf's own comment: this
+    # container is meant to be reached only via the prod edge nginx, over
+    # the shared docker network). A base-level "ports: []" override doesn't
+    # work for this -- compose merges port lists across files rather than
+    # letting an override file clear them, so the old ${HTTP_PORT:-80}:80
+    # default here always won regardless of what dev.yml said, leaving the
+    # dev stack's frontend directly reachable on the public internet at
+    # :8081, bypassing TLS, rate limits, and the single-entry-point design
+    # entirely.
     depends_on:
       - api
       - bot
