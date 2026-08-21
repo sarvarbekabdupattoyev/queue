@@ -22,7 +22,7 @@ async function fetchTicket(code: string): Promise<PublicTicket> {
 
 export default function TicketPage() {
   const { code } = useParams()
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['public-ticket', code],
     queryFn: () => fetchTicket(code!),
     enabled: !!code,
@@ -30,7 +30,7 @@ export default function TicketPage() {
   })
 
   if (isLoading) return <Spinner />
-  if (error || !data)
+  if (!data)
     return (
       <div className="ticket-shell">
         <div className="ticket-card">

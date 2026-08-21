@@ -25,7 +25,11 @@ class Settings(BaseSettings):
     #            notifications and FSM state all go through Redis
     redis_url: str = ""
 
-    secret_key: str = "change-me-in-production"
+    # No default on purpose: this is the JWT signing key, and the codebase
+    # (this file included) is public — a hardcoded fallback here would mean
+    # every deployment that forgets to set SECRET_KEY silently accepts
+    # forgeable tokens instead of failing to start.
+    secret_key: str
     access_token_expire_minutes: int = 60 * 24
     algorithm: str = "HS256"
 
