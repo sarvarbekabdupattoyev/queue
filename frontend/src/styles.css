@@ -766,7 +766,12 @@ a.btn:hover { text-decoration: none; }
    row -- a fixed em/px guess here previously either clipped a wide code
    or, sized generously enough not to clip, left it overlapping the name
    at the small end. Subgrid needs no guessing either way. */
-.next-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: auto auto 1fr auto; align-content: start; gap: 0.6vh 0.8vw; padding-right: 0.4vw; }
+/* padding on every side, not just the right: the first-in-line row draws a
+   2px outline OUTSIDE its own box, and this list scrolls (overflow-y:
+   auto, which clips both axes per spec once either one isn't "visible")
+   -- with no top/left padding that outline had nowhere to render and got
+   clipped flush against the scroll container's edge */
+.next-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: auto auto 1fr auto; align-content: start; gap: 0.6vh 0.8vw; padding: 4px 0.5vw 4px 4px; }
 .next-list .q { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; background: var(--dsp-panel2); border-radius: 1.4vh; padding: 0.7vh 0.8vw; align-items: baseline; text-align: left; }
 .next-list .q-pos { font: 500 clamp(13px, 1.8vh, 28px)/1 var(--body); color: var(--dsp-dim); font-variant-numeric: tabular-nums; min-width: 2.2ch; }
 .next-list .q b { font: 400 clamp(20px, 3.2vh, 48px)/1 var(--display); letter-spacing: 0.06em; white-space: nowrap; }
